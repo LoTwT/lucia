@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync/atomic"
-	"time"
 
 	"github.com/LoTwT/lucia/internal/apppaths"
 	"github.com/LoTwT/lucia/internal/buildinfo"
@@ -102,7 +100,7 @@ func main() {
 
 	var (
 		win      *mygo.Window
-		petWin   *mygo.Window
+		petWin   *petWindow
 		tray     *mygo.Tray
 		quitting bool
 	)
@@ -114,14 +112,9 @@ func main() {
 		win.Focus()
 	}
 	togglePet := func() {
-		if petWin == nil || petWin.IsDestroyed() {
-			return
+		if petWin != nil {
+			petWin.Toggle()
 		}
-		if petWin.IsVisible() {
-			petWin.Hide()
-			return
-		}
-		petWin.ShowInactive()
 	}
 
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { quitting = true })
@@ -177,107 +170,7 @@ func main() {
 	defer stopAutoChecks()
 
 	mygo.App.WhenReady(func() {
-		area := mygo.Screen.PrimaryDisplay().WorkArea
-		petWin = mygo.NewWindow(mygo.WindowOptions{
-			Title:             "Lucia 桌宠",
-			Width:             pet.Size,
-			Height:            pet.Size,
-			X:                 area.X + area.Width - pet.Size - 24,
-			Y:                 area.Y + area.Height - pet.Size - 24,
-			Frameless:         true,
-			Transparent:       true,
-			AlwaysOnTop:       true,
-			Panel:             true,
-			SkipTaskbar:       true,
-			DisableShadow:     true,
-			DisableResize:     true,
-			DisableMinimize:   true,
-			DisableMaximize:   true,
-			DisableFullScreen: true,
-			// Opens where the user left it, keeping the size across launches.
-			StateKey: "pet",
-			Content:  mgui.View(petModel.View),
-		})
-		// Closing the pet hides it; only the tray's quit closes the app.
-		petWin.OnClose(func(e *mygo.CloseEvent) {
-			if quitting {
-				return
-			}
-			e.PreventDefault()
-			petWin.Hide()
-		})
-		// DragWindow's double click asks macOS to zoom the window, even
-		// though a pet has no meaningful maximized state. Undo it at once.
-		petWin.OnMaximize(func() { petWin.Unmaximize() })
-		// Native DragWindow crosses displays without fighting the window
-		// server, but it lets the pet hang past an outer edge. Correct that
-		// after the mouse is released instead of calling SetPosition during
-		// the drag: a position change in the native drag loop is what caused
-		// the bounce at the edge and at the display seam.
-		clampPetOutside := func() {
-			if petWin == nil || petWin.IsDestroyed() {
-				return
-			}
-			x, y := petWin.Position()
-			next, changed := pet.KeepOnScreen(pet.Rect{
-				X: x, Y: y, Width: pet.Size, Height: pet.Size,
-			}, currentPetDisplays())
-			if changed {
-				petWin.SetPosition(next.X, next.Y)
-			}
-		}
-		var clampWatching atomic.Bool
-		petWin.OnMove(func() {
-			x, y := petWin.Position()
-			if _, changed := pet.KeepOnScreen(pet.Rect{
-				X: x, Y: y, Width: pet.Size, Height: pet.Size,
-			}, currentPetDisplays()); !changed {
-				return
-			}
-			if !clampWatching.CompareAndSwap(false, true) {
-				return
-			}
-			go func() {
-				defer clampWatching.Store(false)
-				down, ok := leftMouseButtonDown()
-				if !ok {
-					// No native button state: give the drag time to settle.
-					time.Sleep(300 * time.Millisecond)
-				} else {
-					for down {
-						time.Sleep(25 * time.Millisecond)
-						down, ok = leftMouseButtonDown()
-						if !ok {
-							break
-						}
-					}
-				}
-				clampPetOutside()
-			}()
-		})
-		// Startup and display changes are a recovery path, not a drag: put
-		// the whole window back inside one work area so a position saved on a
-		// disconnected display cannot leave the pet unreachable.
-		clampPet := func() {
-			if petWin == nil || petWin.IsDestroyed() {
-				return
-			}
-			if petWin.IsMaximized() {
-				petWin.Unmaximize()
-			}
-			if w, h := petWin.Size(); w != pet.Size || h != pet.Size {
-				petWin.SetSize(pet.Size, pet.Size)
-			}
-			x, y := petWin.Position()
-			next, changed := pet.KeepOnScreen(pet.Rect{
-				X: x, Y: y, Width: pet.Size, Height: pet.Size,
-			}, currentPetDisplays())
-			if changed {
-				petWin.SetPosition(next.X, next.Y)
-			}
-		}
-		clampPet()
-		mygo.Screen.OnDisplaysChanged(clampPet)
+		petWin = newPetWindow(petModel, func() bool { return quitting })
 
 		win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "Lucia",
@@ -344,31 +237,6 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("lucia: exited")
-}
-
-// currentPetDisplays snapshots the monitor geometry for the pet placement
-// rules. Display changes are rare, so reading it on each move keeps drag
-// behavior correct when a monitor is plugged in or rearranged mid-session.
-func currentPetDisplays() []pet.Display {
-	displays := mygo.Screen.Displays()
-	out := make([]pet.Display, 0, len(displays))
-	for _, display := range displays {
-		out = append(out, pet.Display{
-			Bounds: pet.Rect{
-				X:      display.Bounds.X,
-				Y:      display.Bounds.Y,
-				Width:  display.Bounds.Width,
-				Height: display.Bounds.Height,
-			},
-			WorkArea: pet.Rect{
-				X:      display.WorkArea.X,
-				Y:      display.WorkArea.Y,
-				Width:  display.WorkArea.Width,
-				Height: display.WorkArea.Height,
-			},
-		})
-	}
-	return out
 }
 
 // selfTest reports the identity and updater state of the built artifact.
