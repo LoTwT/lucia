@@ -20,6 +20,8 @@
 
 双方需要准备的内容、分阶段操作、回传材料与判定标准见 [testing-updates.md](testing-updates.md)。
 
+2026-10-20 的 `0.0.1-rc.1` → `0.0.1-rc.2` 演练已在 macOS arm64（`~/Applications`）与 Windows amd64（每用户安装目录）通过；macOS `/Applications` 的 App Management 限制见测试指南。
+
 源文件中的 `mygo.json` 只有公钥与仓库，没有 `tagPrefix`；发布时为标签写入 `v` 或 `test-v`。
 
 ## 更新配置与密钥
@@ -82,10 +84,10 @@ MYGO_UPDATER_PRIVATE_KEY="$(cat ~/.config/lucia/update-keys/mygo-update.key)" \
 按顺序核对并留证：
 
 1. **资产齐全**：上表必需项都存在；两个 `update-*.json` 的 `version` 与标签一致，归档 `url` 指向本标签的 Release。
-2. **构建状态**：从 Release 下载安装包安装后运行自检，macOS：
+2. **构建状态**：从 Release 下载安装包安装后运行自检。测试版 macOS 应用安装到 `~/Applications`（ad-hoc 签名；放到 `/Applications` 可能触发 App Management，原地更新后无法启动）；正式签名版才建议放 `/Applications`：
 
    ```sh
-   LUCIA_SELFTEST=1 /Applications/Lucia.app/Contents/MacOS/Lucia
+   LUCIA_SELFTEST=1 ~/Applications/Lucia.app/Contents/MacOS/Lucia
    ```
 
    Windows 用 PowerShell 将 stderr 重定向到文件。输出必须包含 `updates=enabled` 与标签版本。
@@ -93,7 +95,7 @@ MYGO_UPDATER_PRIVATE_KEY="$(cat ~/.config/lucia/update-keys/mygo-update.key)" \
 4. **安装与重启**：点击“安装并重启”后完成下载、签名校验、替换与自动重启；重启后的“关于”页版本与新标签一致，设置与窗口位置保留。
 5. **签名拒绝**：用一次性测试密钥或篡改过的归档演练，安装必须失败并保留原版本；错误可见，应用继续运行。不要用正式私钥做破坏性演练。
 6. **渠道隔离**：安装测试渠道构建的设备只收到 `test-v` 更新；正式渠道只收到 `v` 更新。测试渠道发布不得成为 latest。
-7. **Gatekeeper / SmartScreen**：ad-hoc 签名的 macOS 应用与未签名 Windows 安装包在干净机器上的首次打开提示按实际记录；这不阻止功能验收，但必须在发布说明中如实告知。
+7. **Gatekeeper / SmartScreen**：ad-hoc 签名的 macOS 应用与未签名 Windows 安装包在干净机器上的首次打开提示按实际记录；这不阻止功能验收，但必须在发布说明中如实告知。macOS 测试版必须装在 `~/Applications`：2026-10-20 在 macOS 27 实测，`/Applications` 内的 ad-hoc 应用可以完成更新写入，但重启后的进程会卡在 dyld；正式版需要 Developer ID 签名与公证后再支持 `/Applications` 自更新。
 8. **差量更新**：第二个版本起，清单包含差量时验证“优先差量、失败回退整包”；首版没有差量属正常。
 
 未完成上述实机验证前，只能声称工程链路已接通，不能声称某次发布已经完成升级验收。

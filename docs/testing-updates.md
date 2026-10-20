@@ -1,6 +1,17 @@
 # 升级链路测试指南（test-v 测试渠道）
 
-更新日期：2026-10-20。状态：待执行。本文只用于验证自动更新，不发布正式版本；发布规则见 [release.md](release.md)，构建与日志位置见 [development.md](development.md)。
+更新日期：2026-10-20。状态：macOS arm64 与 Windows amd64 均已完成 `0.0.1-rc.1` → `0.0.1-rc.2` 实机升级；正式 `v0.0.1` 尚未发布。本文只用于验证自动更新，不发布正式版本；发布规则见 [release.md](release.md)，构建与日志位置见 [development.md](development.md)。
+
+> macOS 实测约束：ad-hoc 签名的测试版请安装在 `~/Applications/Lucia.app`。安装在 `/Applications` 时，更新可以下载、验签并写入，但 macOS 27 的 App Management/LaunchServices 可能让重启后的进程卡在 dyld（进程存在、无窗口）。正式版在 Developer ID 签名并公证后再建议放入 `/Applications`。
+
+## 本轮实测记录（2026-10-20）
+
+| 平台 | 安装位置 | 结果 | 关键证据 |
+|---|---|---|---|
+| macOS arm64 | `~/Applications/Lucia.app` | 通过 | rc.1 → rc.2；下载并校验 12,507 B delta；自动重启；新进程 `version=0.0.1-rc.2`；关于页、设置和窗口位置保留 |
+| Windows amd64 | `%LOCALAPPDATA%\Programs\Lucia\Lucia.exe` | 通过 | rc.1 → rc.2；下载并校验 12,833 B delta（与清单一致）；自动重启；新进程 `version=0.0.1-rc.2 commit=a94ddd3dbcc2`；设置和窗口保留 |
+
+Windows 升级前有三次 GitHub API `403`（14:59、15:04、15:09），15:22 重试成功；升级后日志无错误。未出现 SmartScreen 提示；exe 为 `NotSigned`，外部分发仍有潜在提示风险。macOS 的 `/Applications` 限制见下方第 3 节。
 
 ## 1. 先明确：用哪条“预发布”通道
 
@@ -31,7 +42,7 @@ MyGo v0.5.5 的更新器只接受**已发布、非草稿、且没有勾选 GitHu
 
 - [ ] **确认平台**：macOS arm64、Windows amd64，或两者都测。建议先 macOS，通过后再在 Windows 实机复测。
 - [ ] **授权代码操作**：当前工作区有未提交变更；打标签前需要先提交并推送 `main`。你可以自己完成，或明确授权我提交/推送（按项目 Git 规则使用 `eruoos` 提交、`LoTwT` 查询/合并等）。
-- [ ] **macOS 测试机**：Apple Silicon，能安装 DMG 到 `/Applications`（或用户可写的 `~/Applications`）；不需要 Apple Developer 会员。
+- [ ] **macOS 测试机**：Apple Silicon，能安装 DMG 到用户可写的 `~/Applications`；测试版**不要**放进 `/Applications`（原因见第 3 节）。不需要 Apple Developer 会员。
 - [ ] **Windows 测试机**：x64 Windows 10/11，能运行 NSIS 每用户安装包；不需要代码签名证书。
 - [ ] **网络**：能访问 `github.com`、`api.github.com` 和 Release 资产下载地址；代理需要放行这些域名。
 - [ ] **关闭旧实例**：测试前退出所有 `Lucia` 与 `Lucia Dev` 进程，避免单实例把启动转交给旧进程。
@@ -78,12 +89,18 @@ MyGo v0.5.5 的更新器只接受**已发布、非草稿、且没有勾选 GitHu
    - `update-darwin-arm64.json` / `update-windows-amd64.json` 的版本为 `0.0.1-rc.1`；
    - 草稿被发布为普通 Release，标题类似“Lucia 0.0.1-rc.1（测试版，勿用）”，不设为 latest。
 3. 你从该 Release 下载并安装对应制品：
-   - macOS：`Lucia.0.0.1-rc.1.arm64.dmg`，把 `Lucia.app` 拖入 `/Applications`；
+   - macOS：`Lucia.0.0.1-rc.1.arm64.dmg`，把 `Lucia.app` 拖入 `~/Applications`（用户主目录下的 Applications，不是系统 `/Applications`）；
    - Windows：`Lucia.Setup.0.0.1-rc.1.amd64.exe`，完成每用户安装。
 4. 打开应用，记录基线：
    - “关于”页显示 `v0.0.1-rc.1`；
    - “更新”页点击“检查更新”，此时只有 0.0.1-rc.1 自己，应显示“已是最新版本”；
    - 回传“关于”和“更新”页截图。
+
+### macOS 为什么把测试版放在 `~/Applications`
+
+2026-10-20 在 macOS 27.0.1（26A434, arm64）实测：测试版放在 `/Applications` 时，`0.0.1-rc.1` 能发现并安装 `0.0.1-rc.2`，日志出现 `installed`、`restarting`、`exited`，但新进程启动后卡在 `_dyld_start`，没有窗口，也没有新的 `version=` 日志行。把同一份 `Lucia.app` 放到 `~/Applications` 后，同一升级流程完整通过：下载 12,507 字节的 delta、验签、替换、自动重启，日志出现 `version=0.0.1-rc.2`，窗口与设置保留。
+
+这是系统对 `/Applications` 内 ad-hoc 应用的 App Management/LaunchServices 限制，不是更新清单或签名校验失败。正式分发到 `/Applications` 前，需要 Developer ID 签名并公证；测试阶段用 `~/Applications` 绕过该限制。若已误装到 `/Applications`，退出应用，把应用移到别处，再从 DMG 把 `Lucia.app` 复制到 `~/Applications` 后启动；设置与日志不需要删除。
 
 macOS 日志：`~/Library/Logs/Lucia/lucia.log`。Windows 日志：`%LOCALAPPDATA%\Lucia\logs\lucia.log`。
 
@@ -178,8 +195,10 @@ Windows SmartScreen/安装路径：
 | 0.0.1-rc.1 找不到 0.0.1-rc.2 | 0.0.1-rc.2 是否已发布（不是草稿、不是 Pre-release）；标签是否为 `test-v0.0.1-rc.2`；GitHub API 是否限流；`update-darwin-arm64.json` 的版本与 URL。 |
 | 清单 404 | 资产是否上传完整；Release 是否已发布；tag 前缀是否被 workflow 正确写入构建。 |
 | 下载后验签失败 | 私钥与 `mygo.json` 公钥是否同一对；是否使用了旧密钥构建；资产是否被改动。 |
-| 安装失败 | 安装位置是否可写；磁盘空间；macOS 是否在 `/Applications` 或用户可写的 `~/Applications`；Windows 是否安装在每用户目录。 |
+| 安装失败 | 安装位置是否可写；磁盘空间；macOS 测试版是否放在 `~/Applications`（不要放 `/Applications`）；Windows 是否安装在每用户目录。 |
 | 安装后不重启 | 看日志是否出现 `update installed, restarting` 与 `exited`；确认没有旧进程/单实例拦截。 |
+| 安装后进程存在但无窗口（macOS） | 日志有 `installed`/`restarting` 但没有新的 `version=`；检查是否装在 `/Applications`。这是 App Management 限制，把应用重新复制到 `~/Applications` 后启动，不要重复点击安装。 |
+| 窗口在副屏或看不到 | 检查 `~/Library/Application Support/Lucia/window-state.json` 是否指向当前不可见的显示器；退出应用后移走该文件，再启动会居中显示。 |
 | 重复提示新版本 | 新进程的实际版本是否真的 0.0.1-rc.2；清单版本是否高于运行版本；是否安装到了旧副本。 |
 
 ## 9. 结束与清理

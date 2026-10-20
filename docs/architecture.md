@@ -81,7 +81,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 ## 6. 构建与分发
 
 - `mygo.json` 维护名称、标识 `com.lotwt.lucia`、开发版本 `0.0.1`、入口 `./cmd/lucia`、深链接 scheme `lucia`、输出目录 `build` 与更新源 `LoTwT/lucia`。
-- macOS 目标为 `darwin/arm64`，最低系统 13.0（Go 1.27 的 macOS 下限）；ad-hoc 签名，不依赖付费证书。
+- macOS 目标为 `darwin/arm64`，最低系统 13.0（Go 1.27 的 macOS 下限）；ad-hoc 签名，不依赖付费证书。由于没有 Developer ID/公证，测试版必须安装在用户可写的 `~/Applications`；`/Applications` 受 App Management 限制，原地自更新后可能无法启动。正式分发到 `/Applications` 前需要签名与公证，详见 [release.md](release.md#发布后验证)。
 - Windows 目标为 `windows/amd64`，MyGo 生成 NSIS 每用户安装包。
 - 本应用不需要 cgo，因此 MyGo 默认的 `CGO_ENABLED=0` 可以直接使用；这一点与 youkai 的 OCR 构建不同。
 - 发布版本来自标签而不是提交中的版本号：workflow 在检出副本里写入标签版本与渠道前缀，并用 `git update-index --skip-worktree` 让构建提交号保持干净。
