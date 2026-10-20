@@ -66,6 +66,7 @@ type Model struct {
 	start    time.Time
 	tapAt    time.Time
 	tapReady bool
+	reaction Reaction
 }
 
 // New decodes the embedded frames. Failing here means the build's embedded
@@ -85,10 +86,24 @@ func New() (*Model, error) {
 // TrayIcon returns the PNG shown in the menu bar or notification area.
 func TrayIcon() []byte { return trayPNG }
 
-// Tap starts the squash-and-recover reaction. It is safe to call from the
+// Reaction identifies the interaction that started a response. It keeps the
+// face click and the context-menu head pat distinct so later bubbles and
+// animations can say and do different things.
+type Reaction uint8
+
+const (
+	ReactionNone Reaction = iota
+	ReactionFace
+	ReactionHeadPat
+)
+
+// React starts the squash-and-recover reaction. It is safe to call from the
 // UI thread's click and menu actions; the next view build turns the request
 // into a timestamp from the UI clock.
-func (m *Model) Tap() { m.tapReady = true }
+func (m *Model) React(reaction Reaction) {
+	m.reaction = reaction
+	m.tapReady = true
+}
 
 // View draws the pet on a transparent root. The face is a click target and
 // the rest of the window is a DragWindow handle, so clicking the face reacts
@@ -115,7 +130,7 @@ func (m *Model) View(c *ui.Context) {
 	outer := ui.Box(c).Fill().DragWindow()
 	outer.ContextMenu(func(menu *ui.Menu) {
 		if menu.Item("摸摸头").Chosen() {
-			m.Tap()
+			m.React(ReactionHeadPat)
 		}
 	})
 	outer.Children(func() {
@@ -136,7 +151,7 @@ func (m *Model) View(c *ui.Context) {
 			Size(faceRegion.W, faceRegion.H).
 			Label("摸摸头").
 			Cursor(ui.CursorPointer).
-			OnClick(m.Tap)
+			OnClick(func() { m.React(ReactionFace) })
 	})
 }
 

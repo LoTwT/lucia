@@ -117,6 +117,9 @@ func TestClickFaceStartsReaction(t *testing.T) {
 	if m.tapAt.IsZero() {
 		t.Fatal("clicking the face did not start the reaction")
 	}
+	if m.reaction != ReactionFace {
+		t.Fatalf("reaction = %v, want ReactionFace", m.reaction)
+	}
 }
 
 func TestClickBodyKeepsDragArea(t *testing.T) {
@@ -130,6 +133,9 @@ func TestClickBodyKeepsDragArea(t *testing.T) {
 	tt.Frame()
 	if !m.tapAt.IsZero() {
 		t.Fatal("clicking outside the face started a reaction")
+	}
+	if m.reaction != ReactionNone {
+		t.Fatalf("reaction = %v, want ReactionNone", m.reaction)
 	}
 }
 
@@ -157,6 +163,9 @@ func TestContextMenuStartsReaction(t *testing.T) {
 	tt.Frame()
 	if m.tapAt.IsZero() {
 		t.Fatal("choosing the context menu item did not start the reaction")
+	}
+	if m.reaction != ReactionHeadPat {
+		t.Fatalf("reaction = %v, want ReactionHeadPat", m.reaction)
 	}
 }
 
