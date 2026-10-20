@@ -64,5 +64,7 @@ gh secret set MYGO_UPDATER_PRIVATE_KEY < ~/.config/lucia/update-keys/mygo-update
 | `internal/settings/` | 设置读写。 |
 | `internal/apppaths/` | 各平台用户目录解析。 |
 | `internal/diagnostics/` | 文件日志与轮转。 |
+| `internal/pet/` | 桌宠模型、idle 动画、点击反应与透明视图。 |
+| `internal/pet/assets/deepseek-whale/` | 桌宠立绘与授权说明；美术素材按 CC BY-NC-SA 4.0，仅限非商业使用。 |
 | `resources/` | 图标与随包分发的第三方声明。 |
 | `design/` | 图标 SVG 源文件。 |

@@ -5,6 +5,7 @@
 | 文档 | 阅读场景 |
 |---|---|
 | [architecture.md](architecture.md) | 了解模块边界、启动顺序、数据位置、更新状态机与构建分发约束。 |
+| [specs/desktop-pet.md](specs/desktop-pet.md) | 桌宠增量 A/B 的窗口形态、常驻生命周期、idle 行为、点击反应与验收标准。 |
 | [development.md](development.md) | 准备环境、本地启动、运行测试、排查日志与使用开发开关。 |
 | [release.md](release.md) | 版本与渠道规则、更新密钥、打标签发布、发布后验证。 |
 | [testing-updates.md](testing-updates.md) | 用 `test-v` 测试渠道演练 `0.0.1-rc.1` → `0.0.1-rc.2` 升级链路时，双方需要准备的内容与操作步骤。 |
