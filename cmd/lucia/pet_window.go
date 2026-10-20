@@ -13,9 +13,12 @@ import (
 // reachable. The console and tray live in main.go; keeping this wiring here
 // leaves room for the bubble window without turning main into a window module.
 type petWindow struct {
-	win    *mygo.Window
-	onMove func()
-	onHide func()
+	win          *mygo.Window
+	onMove       func()
+	onHide       func()
+	onDragStart  func()
+	onDragEnd    func()
+	dragWatching atomic.Bool
 }
 
 func newPetWindow(model *pet.Model, quitting func() bool) *petWindow {
@@ -61,6 +64,15 @@ func newPetWindow(model *pet.Model, quitting func() bool) *petWindow {
 	p.win.OnMove(func() {
 		if p.onMove != nil {
 			p.onMove()
+		}
+		if !p.dragWatching.Load() {
+			if down, ok := leftMouseButtonDown(); ok && down {
+				p.dragWatching.Store(true)
+				if p.onDragStart != nil {
+					p.onDragStart()
+				}
+				go p.watchDrag()
+			}
 		}
 		x, y := p.win.Position()
 		if _, changed := pet.KeepOnScreen(pet.Rect{
@@ -129,6 +141,29 @@ func (p *petWindow) IsVisible() bool {
 	return p != nil && p.win != nil && !p.win.IsDestroyed() && p.win.IsVisible()
 }
 
+func (p *petWindow) SetOnMove(fn func())      { p.onMove = fn }
+func (p *petWindow) SetOnHide(fn func())      { p.onHide = fn }
+func (p *petWindow) SetOnDragStart(fn func()) { p.onDragStart = fn }
+func (p *petWindow) SetOnDragEnd(fn func())   { p.onDragEnd = fn }
+
+// watchDrag waits for the native drag's mouse button to come up. The end
+// callback runs on the UI thread, where the pet's state lives.
+func (p *petWindow) watchDrag() {
+	for {
+		down, ok := leftMouseButtonDown()
+		if !ok || !down {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	mygo.RunOnMain(func() {
+		p.dragWatching.Store(false)
+		if p.onDragEnd != nil {
+			p.onDragEnd()
+		}
+	})
+}
+
 func (p *petWindow) Rect() pet.Rect {
 	if p == nil || p.win == nil || p.win.IsDestroyed() {
 		return pet.Rect{Width: pet.Size, Height: pet.Size}
@@ -136,9 +171,6 @@ func (p *petWindow) Rect() pet.Rect {
 	x, y := p.win.Position()
 	return pet.Rect{X: x, Y: y, Width: pet.Size, Height: pet.Size}
 }
-
-func (p *petWindow) SetOnMove(fn func()) { p.onMove = fn }
-func (p *petWindow) SetOnHide(fn func()) { p.onHide = fn }
 
 func (p *petWindow) clampOutside() {
 	if p == nil || p.win == nil || p.win.IsDestroyed() {

@@ -85,6 +85,89 @@ func TestViewRendersTransparentPet(t *testing.T) {
 	}
 }
 
+func TestActivityAt(t *testing.T) {
+	tests := []struct {
+		name string
+		idle time.Duration
+		want Activity
+	}{
+		{name: "awake", idle: 0, want: ActivityAwake},
+		{name: "awake before threshold", idle: drowsyAfter - time.Second, want: ActivityAwake},
+		{name: "drowsy", idle: drowsyAfter, want: ActivityDrowsy},
+		{name: "drowsy before sleep", idle: asleepAfter - time.Second, want: ActivityDrowsy},
+		{name: "asleep", idle: asleepAfter, want: ActivityAsleep},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := activityAt(tt.idle); got != tt.want {
+				t.Fatalf("activityAt(%v) = %v, want %v", tt.idle, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFrameForActivity(t *testing.T) {
+	if got := frameFor(ActivityAwake, 0); got != frameOpen {
+		t.Fatalf("awake frame = %v, want open", got)
+	}
+	if got := frameFor(ActivityDrowsy, 0); got != frameHalfClosed {
+		t.Fatalf("drowsy frame = %v, want half closed", got)
+	}
+	if got := frameFor(ActivityAsleep, 0); got != frameClosed {
+		t.Fatalf("asleep frame = %v, want closed", got)
+	}
+}
+
+func TestReactionMotionDiffers(t *testing.T) {
+	face, faceLift := reactionMotion(ReactionFace, 100*time.Millisecond)
+	headPat, headPatLift := reactionMotion(ReactionHeadPat, 100*time.Millisecond)
+	if headPat >= face {
+		t.Fatalf("head-pat squash = %v, want less than face squash %v", headPat, face)
+	}
+	if faceLift != 0 {
+		t.Fatalf("face lift = %v, want 0", faceLift)
+	}
+	if headPatLift >= 0 {
+		t.Fatalf("head-pat lift = %v, want a small lift", headPatLift)
+	}
+	if face <= 0 {
+		t.Fatalf("face reaction at 100ms = %v, want a visible squash", face)
+	}
+	if squash, lift := reactionMotion(ReactionFace, tapDuration); squash != 0 || lift != 0 {
+		t.Fatalf("face after duration = (%v, %v), want still", squash, lift)
+	}
+}
+
+func TestDragKeepsAwake(t *testing.T) {
+	m := &Model{lastInteraction: time.Now().Add(-asleepAfter)}
+	if got := m.activity(time.Now()); got != ActivityAsleep {
+		t.Fatalf("activity before drag = %v, want asleep", got)
+	}
+	m.DragStarted()
+	if got := m.activity(time.Now()); got != ActivityAwake {
+		t.Fatalf("activity during drag = %v, want awake", got)
+	}
+}
+
+func TestInteractionWakesForNextFrame(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tt := ui.NewTester(m.View, Size, Size)
+	tt.Frame()
+	tt.Advance(asleepAfter)
+	tt.Frame()
+	if got := m.activity(tt.Now()); got != ActivityAsleep {
+		t.Fatalf("activity after idle = %v, want asleep", got)
+	}
+	m.React(ReactionFace)
+	tt.Frame()
+	if got := m.activity(tt.Now()); got != ActivityAwake {
+		t.Fatalf("activity after interaction = %v, want awake", got)
+	}
+}
+
 func TestTapAmount(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -179,6 +179,11 @@ func main() {
 		bubbleWin = newBubbleWindow()
 		petWin.SetOnMove(func() { bubbleWin.Hide() })
 		petWin.SetOnHide(func() { bubbleWin.Hide() })
+		petWin.SetOnDragStart(func() {
+			petModel.DragStarted()
+			bubbleWin.Hide()
+		})
+		petWin.SetOnDragEnd(func() { petModel.DragEnded() })
 		petModel.SetReactionHandler(func(reaction pet.Reaction) {
 			if petWin == nil || !petWin.IsVisible() {
 				return
