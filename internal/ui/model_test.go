@@ -53,6 +53,43 @@ func TestOverviewShowsBuildIdentity(t *testing.T) {
 	}
 }
 
+func TestOverviewShowsPetControls(t *testing.T) {
+	model := New(Config{
+		Version:          "0.0.1",
+		Commit:           "0123456789ab",
+		Platform:         "darwin/arm64",
+		DataDir:          "/tmp/lucia",
+		Updates:          updates.New(disabledSource{}, "0.0.1"),
+		Settings:         settings.Default(),
+		OpenAtLogin:      func() bool { return false },
+		SetOpenAtLogin:   func(bool) error { return nil },
+		ResetPetPosition: func() {},
+	})
+	tt := ui.NewTester(model.View, 1000, 700)
+	for _, want := range []string{"桌宠", "显示桌宠", "开机自启", "重置桌宠位置"} {
+		if !tt.HasText(want) {
+			t.Errorf("overview does not show %q; texts: %v", want, tt.Texts())
+		}
+	}
+}
+
+func TestSetPetVisiblePersists(t *testing.T) {
+	var saved settings.Settings
+	model := New(Config{
+		Version:      "0.0.1",
+		Updates:      updates.New(disabledSource{}, "0.0.1"),
+		Settings:     settings.Default(),
+		SaveSettings: func(s settings.Settings) error { saved = s; return nil },
+	})
+	model.SetPetVisible(false)
+	if model.settings.PetVisible {
+		t.Fatal("model still shows the pet")
+	}
+	if saved.PetVisible {
+		t.Fatal("saved settings still show the pet")
+	}
+}
+
 func TestSidebarNavigatesToUpdatesAndAbout(t *testing.T) {
 	model, _ := newTestModel(t, fakeSource{})
 	tt := ui.NewTester(model.View, 1000, 700)

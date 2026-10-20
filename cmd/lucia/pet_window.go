@@ -21,7 +21,7 @@ type petWindow struct {
 	dragWatching atomic.Bool
 }
 
-func newPetWindow(model *pet.Model, quitting func() bool) *petWindow {
+func newPetWindow(model *pet.Model, quitting func() bool, visible bool) *petWindow {
 	area := mygo.Screen.PrimaryDisplay().WorkArea
 	p := &petWindow{}
 	p.win = mygo.NewWindow(mygo.WindowOptions{
@@ -40,6 +40,7 @@ func newPetWindow(model *pet.Model, quitting func() bool) *petWindow {
 		DisableMinimize:   true,
 		DisableMaximize:   true,
 		DisableFullScreen: true,
+		Hidden:            !visible,
 		// Opens where the user left it, keeping the size across launches.
 		StateKey: "pet",
 		Content:  mgui.View(model.View),
@@ -130,10 +131,32 @@ func (p *petWindow) Hide() {
 	}
 }
 
+func (p *petWindow) SetVisible(visible bool) {
+	if visible {
+		p.ShowInactive()
+		return
+	}
+	p.Hide()
+}
+
 func (p *petWindow) ShowInactive() {
 	if p == nil || p.win == nil || p.win.IsDestroyed() {
 		return
 	}
+	p.win.ShowInactive()
+}
+
+// ResetPosition puts the pet back at its first-launch corner and brings it
+// back if the user had hidden it.
+func (p *petWindow) ResetPosition() {
+	if p == nil || p.win == nil || p.win.IsDestroyed() {
+		return
+	}
+	area := mygo.Screen.PrimaryDisplay().WorkArea
+	p.win.SetPosition(
+		area.X+area.Width-pet.Size-24,
+		area.Y+area.Height-pet.Size-24,
+	)
 	p.win.ShowInactive()
 }
 

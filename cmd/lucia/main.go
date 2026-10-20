@@ -85,19 +85,6 @@ func main() {
 		log.Fatalf("lucia: pet assets: %v", err)
 	}
 
-	model := appui.New(appui.Config{
-		Version:       info.Version,
-		Commit:        info.CommitLabel(),
-		Platform:      buildinfo.Platform(),
-		DataDir:       paths.Data,
-		Updates:       manager,
-		Settings:      prefs,
-		SaveSettings:  func(s settings.Settings) error { return settings.Save(paths.Data, s) },
-		OpenDataDir:   func() error { return mygo.Shell.OpenPath(paths.Data) },
-		RepositoryURL: repositoryURL,
-		UpdateSource:  "LoTwT/lucia",
-	})
-
 	var (
 		win       *mygo.Window
 		petWin    *petWindow
@@ -105,6 +92,23 @@ func main() {
 		tray      *mygo.Tray
 		quitting  bool
 	)
+	model := appui.New(appui.Config{
+		Version:          info.Version,
+		Commit:           info.CommitLabel(),
+		Platform:         buildinfo.Platform(),
+		DataDir:          paths.Data,
+		Updates:          manager,
+		Settings:         prefs,
+		SaveSettings:     func(s settings.Settings) error { return settings.Save(paths.Data, s) },
+		ApplyPetVisible:  func(visible bool) { petWin.SetVisible(visible) },
+		OpenAtLogin:      func() bool { return mygo.App.OpenAtLogin() },
+		SetOpenAtLogin:   func(open bool) error { return mygo.App.SetOpenAtLogin(open) },
+		ResetPetPosition: func() { petWin.ResetPosition() },
+		OpenDataDir:      func() error { return mygo.Shell.OpenPath(paths.Data) },
+		RepositoryURL:    repositoryURL,
+		UpdateSource:     "LoTwT/lucia",
+	})
+
 	showWindow := func() {
 		if win == nil || win.IsDestroyed() {
 			return
@@ -120,6 +124,23 @@ func main() {
 			bubbleWin.Hide()
 		}
 		petWin.Toggle()
+		visible := petWin.IsVisible()
+		prefs.PetVisible = visible
+		model.SetPetVisible(visible)
+		if win != nil && !win.IsDestroyed() {
+			win.Update(func() {})
+		}
+	}
+	resetPet := func() {
+		if petWin == nil {
+			return
+		}
+		petWin.ResetPosition()
+		prefs.PetVisible = true
+		model.SetPetVisible(true)
+		if win != nil && !win.IsDestroyed() {
+			win.Update(func() {})
+		}
 	}
 
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { quitting = true })
@@ -175,7 +196,7 @@ func main() {
 	defer stopAutoChecks()
 
 	mygo.App.WhenReady(func() {
-		petWin = newPetWindow(petModel, func() bool { return quitting })
+		petWin = newPetWindow(petModel, func() bool { return quitting }, prefs.PetVisible)
 		bubbleWin = newBubbleWindow()
 		petWin.SetOnMove(func() { bubbleWin.Hide() })
 		petWin.SetOnHide(func() { bubbleWin.Hide() })
@@ -216,6 +237,7 @@ func main() {
 			ToolTip: "Lucia 桌宠",
 			Menu: mygo.NewMenu([]*mygo.MenuItem{
 				{Label: "显示/隐藏宠物", Click: func(*mygo.MenuItem, *mygo.Window) { togglePet() }},
+				{Label: "重置宠物位置", Click: func(*mygo.MenuItem, *mygo.Window) { resetPet() }},
 				{Label: "打开 Lucia", Click: func(*mygo.MenuItem, *mygo.Window) { showWindow() }},
 				mygo.Separator(),
 				{Label: "退出", Click: func(*mygo.MenuItem, *mygo.Window) {

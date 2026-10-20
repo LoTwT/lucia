@@ -37,6 +37,15 @@ type Config struct {
 	// SaveSettings persists a preference change. Nil keeps changes in
 	// memory only (tests).
 	SaveSettings func(settings.Settings) error
+	// ApplyPetVisible shows or hides the desktop pet after the preference
+	// changes. Nil hides the control in tests or embedded hosts.
+	ApplyPetVisible func(bool)
+	// OpenAtLogin reports the login item state. Nil hides the control.
+	OpenAtLogin func() bool
+	// SetOpenAtLogin changes the login item. Nil hides the control.
+	SetOpenAtLogin func(bool) error
+	// ResetPetPosition moves the pet back to its first-launch corner.
+	ResetPetPosition func()
 	// OpenDataDir opens the data root in the system file manager. Nil hides
 	// the action.
 	OpenDataDir func() error
@@ -57,6 +66,9 @@ type Model struct {
 	actionErr string
 	// settingsErr reports a failed preference write.
 	settingsErr string
+	// openAtLogin mirrors the system login item while the console is open.
+	openAtLogin      bool
+	openAtLoginKnown bool
 }
 
 // New creates the window model on the overview page.
@@ -173,9 +185,67 @@ func (m *Model) pageHeading() (title, subtitle string) {
 
 func (m *Model) overviewPage(c *ui.Context) {
 	m.hero(c)
+	m.petCard(c)
 	ui.Row(c).Gap(16).AlignItems(ui.Stretch).Children(func() {
 		m.statusCard(c)
 		m.updateSummaryCard(c)
+	})
+}
+
+// SetPetVisible keeps the console's copy in sync when the tray toggles the
+// pet. It also persists the new state.
+func (m *Model) SetPetVisible(visible bool) {
+	if m.settings.PetVisible == visible {
+		return
+	}
+	m.settings.PetVisible = visible
+	m.saveSettings()
+}
+
+func (m *Model) petCard(c *ui.Context) {
+	t := c.Theme()
+	panel(c, "桌宠", func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+			ui.Column(c).Gap(2).Grow(1).Children(func() {
+				ui.Text(c, "显示桌宠").FontSize(14)
+				ui.Text(c, "隐藏后仍可从托盘重新显示；该状态会保留到下次启动。").FontSize(12).
+					TextColor(t.TextMuted)
+			})
+			ui.Switch(c, &m.settings.PetVisible).Label("显示桌宠").OnChange(func() {
+				m.saveSettings()
+				if m.cfg.ApplyPetVisible != nil {
+					m.cfg.ApplyPetVisible(m.settings.PetVisible)
+				}
+			})
+		})
+
+		if m.cfg.OpenAtLogin != nil && m.cfg.SetOpenAtLogin != nil {
+			if !m.openAtLoginKnown {
+				m.openAtLogin = m.cfg.OpenAtLogin()
+				m.openAtLoginKnown = true
+			}
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "开机自启").FontSize(14)
+					ui.Text(c, "登录系统后自动启动 Lucia 和桌宠。").FontSize(12).TextColor(t.TextMuted)
+				})
+				ui.Switch(c, &m.openAtLogin).Label("开机自启").OnChange(func() {
+					if err := m.cfg.SetOpenAtLogin(m.openAtLogin); err != nil {
+						m.settingsErr = fmt.Sprintf("设置开机自启失败：%v", err)
+					} else {
+						m.settingsErr = ""
+					}
+				})
+			})
+		}
+
+		if m.cfg.ResetPetPosition != nil {
+			if ui.Button(c, "重置桌宠位置").Clicked() {
+				m.settings.PetVisible = true
+				m.saveSettings()
+				m.cfg.ResetPetPosition()
+			}
+		}
 	})
 }
 
