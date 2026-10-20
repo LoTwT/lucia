@@ -109,13 +109,16 @@ func main() {
 			prefs = s
 			return nil
 		},
-		ApplyPetVisible:  func(visible bool) { petWin.SetVisible(visible) },
-		OpenAtLogin:      func() bool { return mygo.App.OpenAtLogin() },
-		SetOpenAtLogin:   func(open bool) error { return mygo.App.SetOpenAtLogin(open) },
-		ResetPetPosition: func() { petWin.ResetPosition() },
-		OpenDataDir:      func() error { return mygo.Shell.OpenPath(paths.Data) },
-		RepositoryURL:    repositoryURL,
-		UpdateSource:     "LoTwT/lucia",
+		ApplyPetVisible: func(visible bool) { petWin.SetVisible(visible) },
+		OpenAtLogin:     func() bool { return mygo.App.OpenAtLogin() },
+		SetOpenAtLogin:  func(open bool) error { return mygo.App.SetOpenAtLogin(open) },
+		ResetPetPosition: func() {
+			bubbleWin.Hide()
+			petWin.ResetPosition()
+		},
+		OpenDataDir:   func() error { return mygo.Shell.OpenPath(paths.Data) },
+		RepositoryURL: repositoryURL,
+		UpdateSource:  "LoTwT/lucia",
 	})
 
 	showWindow := func() {
@@ -144,6 +147,7 @@ func main() {
 		if petWin == nil {
 			return
 		}
+		bubbleWin.Hide()
 		petWin.ResetPosition()
 		prefs.PetVisible = true
 		model.SetPetVisible(true)
