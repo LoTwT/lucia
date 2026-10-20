@@ -1,0 +1,18 @@
+# MyGo build and development outputs
+/build/
+/.mygo/
+mygo_windows_*.syso
+
+# Go binaries built into the repository root
+/lucia
+/lucia.exe
+
+# Update signing keys never enter Git. The public key lives in mygo.json.
+mygo-update.key
+mygo-update.pub
+
+# OS
+.DS_Store
+
+# Lody session data
+.lody/

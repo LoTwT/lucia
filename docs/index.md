@@ -2,7 +2,14 @@
 
 ## 文档导航
 
-尚未收录项目文档。收录时使用已有文档的相对链接，并说明适用的阅读场景；新增、移动或移除文档时同步维护导航。
+| 文档 | 阅读场景 |
+|---|---|
+| [architecture.md](architecture.md) | 了解模块边界、启动顺序、数据位置、更新状态机与构建分发约束。 |
+| [development.md](development.md) | 准备环境、本地启动、运行测试、排查日志与使用开发开关。 |
+| [release.md](release.md) | 版本与渠道规则、更新密钥、打标签发布、发布后验证。 |
+| [testing-updates.md](testing-updates.md) | 用 `test-v` 测试渠道演练 `0.0.1-rc.1` → `0.0.1-rc.2` 升级链路时，双方需要准备的内容与操作步骤。 |
+| [../README.md](../README.md) | 项目简介与最短上手命令。 |
+| [../CHANGELOG.md](../CHANGELOG.md) | 用户可见的版本说明；也作为应用内更新说明的来源。 |
 
 ## 目录约定
 

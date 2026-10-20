@@ -1,0 +1,15 @@
+{
+  "name": "Lucia",
+  "identifier": "com.lotwt.lucia",
+  "version": "0.0.1",
+  "main": "./cmd/lucia",
+  "urlSchemes": ["lucia"],
+  "out": "build",
+  "updates": {
+    "publicKey": "Q85i2CaTao+ak1bn9nH3fxmhH6HnivFG8s8GuHWA4VM=",
+    "github": "LoTwT/lucia"
+  },
+  "macos": {
+    "minimumSystemVersion": "13.0"
+  }
+}
