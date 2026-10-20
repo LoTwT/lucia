@@ -50,6 +50,15 @@ const (
 	// the last interaction. The view clock decides the state; no timer runs.
 	drowsyAfter = 60 * time.Second
 	asleepAfter = 3 * time.Minute
+	// Frame intervals replace an unconditional AnimationFrame. The breathing
+	// bob is slow, so 30 fps is enough while awake; reactions need more
+	// frames, and resting states can redraw far less often. This keeps the
+	// idle pet from rebuilding its whole view on every display refresh.
+	activeFrameInterval = 16 * time.Millisecond
+	idleFrameInterval   = 33 * time.Millisecond
+	drowsyFrameInterval = 66 * time.Millisecond
+	asleepFrameInterval = 100 * time.Millisecond
+	minFrameInterval    = time.Millisecond
 )
 
 // The face region receives clicks; the rest of the window stays a
@@ -98,6 +107,7 @@ type Model struct {
 	tapReady        bool
 	reaction        Reaction
 	onReaction      func(Reaction)
+	onInvalidate    func()
 }
 
 // New decodes the embedded frames. Failing here means the build's embedded
@@ -132,6 +142,17 @@ const (
 // bubble window uses it to choose the line that belongs to the interaction.
 func (m *Model) SetReactionHandler(fn func(Reaction)) { m.onReaction = fn }
 
+// SetInvalidator asks for a fresh frame when state changes outside the view,
+// such as a click or the start of a drag. Without this, a resting pet that
+// schedules only its next blink could stay visually asleep after a drag.
+func (m *Model) SetInvalidator(fn func()) { m.onInvalidate = fn }
+
+func (m *Model) invalidate() {
+	if m.onInvalidate != nil {
+		m.onInvalidate()
+	}
+}
+
 // React starts the squash-and-recover reaction. It is safe to call from the
 // UI thread's click and menu actions; the next view build turns the request
 // into a timestamp from the UI clock.
@@ -142,6 +163,7 @@ func (m *Model) React(reaction Reaction) {
 	if m.onReaction != nil {
 		m.onReaction(reaction)
 	}
+	m.invalidate()
 }
 
 // DragStarted and DragEnded keep the pet awake for the whole native drag.
@@ -149,11 +171,13 @@ func (m *Model) React(reaction Reaction) {
 func (m *Model) DragStarted() {
 	m.dragging = true
 	m.interacted = true
+	m.invalidate()
 }
 
 func (m *Model) DragEnded() {
 	m.dragging = false
 	m.interacted = true
+	m.invalidate()
 }
 
 func (m *Model) activity(now time.Time) Activity {
@@ -183,15 +207,13 @@ func (m *Model) View(c *ui.Context) {
 		m.tapReady = false
 	}
 	elapsed := now.Sub(m.start)
+	idle := now.Sub(m.lastInteraction)
 	activity := m.activity(now)
+	reactionElapsed := now.Sub(m.tapAt)
+	reduceMotion := c.Preferences().ReduceMotion
+	bob, squash, lift := motionFor(reduceMotion, elapsed, m.reaction, reactionElapsed)
 
-	// The character is always moving: either breathing or blinking. Ask
-	// for the next display frame while the window is visible.
-	c.AnimationFrame()
 	c.Root().Background(ui.Transparent)
-
-	bob := float32(math.Sin(2*math.Pi*float64(elapsed)/float64(bobPeriod))) * bobAmplitude
-	squash, lift := reactionMotion(m.reaction, now.Sub(m.tapAt))
 
 	outer := ui.Box(c).Fill().DragWindow()
 	outer.ContextMenu(func(menu *ui.Menu) {
@@ -201,7 +223,7 @@ func (m *Model) View(c *ui.Context) {
 	})
 	outer.Children(func() {
 		ui.Row(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-			image := ui.Image(c, m.frames[frameFor(activity, elapsed)]).
+			image := ui.Image(c, m.frames[displayFrame(activity, elapsed, m.reaction, reactionElapsed, reduceMotion)]).
 				Size(spriteSize, spriteSize).
 				Fit(ui.Contain).
 				Label("Lucia 桌宠").
@@ -219,6 +241,111 @@ func (m *Model) View(c *ui.Context) {
 			Cursor(ui.CursorPointer).
 			OnClick(func() { m.React(ReactionFace) })
 	})
+
+	// Ask only for the frames this state needs. The view clock still derives
+	// every pose, so there is no ticker or background goroutine.
+	if delay := nextFrameDelay(activity, idle, elapsed, reactionElapsed, m.reaction, reduceMotion); delay > 0 {
+		c.After(delay)
+	}
+}
+
+// motionFor keeps every continuous transform in one place. Reduce Motion
+// removes the breathing bob and the squash/lift reaction, leaving the
+// discrete frame change from displayFrame as the only feedback.
+func motionFor(reduceMotion bool, elapsed time.Duration, reaction Reaction, reactionElapsed time.Duration) (bob, squash, lift float32) {
+	if reduceMotion {
+		return 0, 0, 0
+	}
+	bob = float32(math.Sin(2*math.Pi*float64(elapsed)/float64(bobPeriod))) * bobAmplitude
+	squash, lift = reactionMotion(reaction, reactionElapsed)
+	return bob, squash, lift
+}
+
+// displayFrame chooses the sprite frame. With Reduce Motion, a reaction
+// briefly closes or half-closes the eyes instead of moving the body.
+func displayFrame(activity Activity, elapsed time.Duration, reaction Reaction, reactionElapsed time.Duration, reduceMotion bool) frame {
+	if reduceMotion && reactionActive(reaction, reactionElapsed) {
+		if reaction == ReactionHeadPat {
+			return frameHalfClosed
+		}
+		return frameClosed
+	}
+	return frameFor(activity, elapsed)
+}
+
+func reactionDuration(reaction Reaction) time.Duration {
+	switch reaction {
+	case ReactionFace:
+		return tapDuration
+	case ReactionHeadPat:
+		return headPatDuration
+	default:
+		return 0
+	}
+}
+
+func reactionActive(reaction Reaction, elapsed time.Duration) bool {
+	duration := reactionDuration(reaction)
+	return duration > 0 && elapsed >= 0 && elapsed < duration
+}
+
+// nextFrameDelay returns how long the view can wait before its next visible
+// change. A zero delay means no future frame is needed until an interaction
+// or preference change invalidates the window.
+func nextFrameDelay(activity Activity, idle, elapsed, reactionElapsed time.Duration, reaction Reaction, reduceMotion bool) time.Duration {
+	if reactionActive(reaction, reactionElapsed) {
+		if reduceMotion {
+			return max(reactionDuration(reaction)-reactionElapsed, minFrameInterval)
+		}
+		return activeFrameInterval
+	}
+
+	if !reduceMotion {
+		switch activity {
+		case ActivityAsleep:
+			return asleepFrameInterval
+		case ActivityDrowsy:
+			return drowsyFrameInterval
+		default:
+			return idleFrameInterval
+		}
+	}
+
+	// Reduce Motion: wake only for a discrete state change.
+	switch activity {
+	case ActivityAsleep:
+		return 0
+	case ActivityDrowsy:
+		return max(asleepAfter-idle, minFrameInterval)
+	default:
+		next := nextBlinkDelay(elapsed)
+		if untilDrowsy := drowsyAfter - idle; untilDrowsy > 0 && untilDrowsy < next {
+			next = untilDrowsy
+		}
+		return max(next, minFrameInterval)
+	}
+}
+
+// nextBlinkDelay returns the time until the next blink frame. Each edge in
+// the sequence is a visible change, and the final edge is the next period's
+// open frame at the period boundary.
+func nextBlinkDelay(elapsed time.Duration) time.Duration {
+	phase := elapsed % blinkPeriod
+	switch {
+	case phase < blinkAt:
+		return blinkAt - phase
+	case phase < blinkAt+halfBlink:
+		return blinkAt + halfBlink - phase
+	case phase < blinkAt+halfBlink+closedBlink:
+		return blinkAt + halfBlink + closedBlink - phase
+	case phase < blinkAt+2*halfBlink+closedBlink:
+		// The blink sequence ends just after the period boundary. The
+		// visible change there is the next period's open frame, not a
+		// final half-closed frame.
+		return min(blinkAt+2*halfBlink+closedBlink, blinkPeriod) - phase
+	default:
+		return blinkPeriod - phase + blinkAt
+	}
 }
 
 // tapAmount returns 0 outside the reaction and a 0→1→0 squash inside it.

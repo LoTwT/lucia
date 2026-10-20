@@ -80,9 +80,6 @@ func TestViewRendersTransparentPet(t *testing.T) {
 	if opaque == 0 {
 		t.Fatal("pet rendered no visible pixels")
 	}
-	if !tt.FramePending() {
-		t.Fatal("idle animation did not request another frame")
-	}
 }
 
 func TestActivityAt(t *testing.T) {
@@ -115,6 +112,138 @@ func TestFrameForActivity(t *testing.T) {
 	}
 	if got := frameFor(ActivityAsleep, 0); got != frameClosed {
 		t.Fatalf("asleep frame = %v, want closed", got)
+	}
+}
+
+func TestFrameDelay(t *testing.T) {
+	tests := []struct {
+		name            string
+		activity        Activity
+		idle            time.Duration
+		elapsed         time.Duration
+		reactionElapsed time.Duration
+		reaction        Reaction
+		reduceMotion    bool
+		want            time.Duration
+	}{
+		{
+			name:     "awake animation",
+			activity: ActivityAwake,
+			want:     idleFrameInterval,
+		},
+		{
+			name:            "face reaction",
+			activity:        ActivityAwake,
+			elapsed:         time.Second,
+			reactionElapsed: 100 * time.Millisecond,
+			reaction:        ReactionFace,
+			want:            activeFrameInterval,
+		},
+		{
+			name:            "reduce motion face reaction",
+			activity:        ActivityAwake,
+			reactionElapsed: 100 * time.Millisecond,
+			reaction:        ReactionFace,
+			reduceMotion:    true,
+			want:            tapDuration - 100*time.Millisecond,
+		},
+		{
+			name:            "reduce motion head pat",
+			activity:        ActivityAwake,
+			reactionElapsed: 100 * time.Millisecond,
+			reaction:        ReactionHeadPat,
+			reduceMotion:    true,
+			want:            headPatDuration - 100*time.Millisecond,
+		},
+		{
+			name:         "reduce motion waits for blink",
+			activity:     ActivityAwake,
+			reduceMotion: true,
+			want:         blinkAt,
+		},
+		{
+			name:         "reduce motion wakes for drowsiness",
+			activity:     ActivityAwake,
+			idle:         drowsyAfter - time.Second,
+			reduceMotion: true,
+			want:         time.Second,
+		},
+		{
+			name:         "reduce motion waits for sleep",
+			activity:     ActivityDrowsy,
+			idle:         drowsyAfter,
+			reduceMotion: true,
+			want:         asleepAfter - drowsyAfter,
+		},
+		{
+			name:         "reduce motion asleep stops",
+			activity:     ActivityAsleep,
+			idle:         asleepAfter,
+			reduceMotion: true,
+			want:         0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := nextFrameDelay(tt.activity, tt.idle, tt.elapsed, tt.reactionElapsed, tt.reaction, tt.reduceMotion)
+			if got != tt.want {
+				t.Fatalf("nextFrameDelay = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNextBlinkDelay(t *testing.T) {
+	tests := []struct {
+		name    string
+		elapsed time.Duration
+		want    time.Duration
+	}{
+		{name: "open", elapsed: 0, want: blinkAt},
+		{name: "half closed", elapsed: blinkAt, want: halfBlink},
+		{name: "closed", elapsed: blinkAt + halfBlink, want: closedBlink},
+		{name: "half closed again opens at the period", elapsed: blinkAt + halfBlink + closedBlink, want: blinkPeriod - (blinkAt + halfBlink + closedBlink)},
+		{name: "next period opens the eyes", elapsed: blinkPeriod - time.Millisecond, want: time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := nextBlinkDelay(tt.elapsed); got != tt.want {
+				t.Fatalf("nextBlinkDelay(%v) = %v, want %v", tt.elapsed, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReduceMotionSkipsContinuousMotion(t *testing.T) {
+	bob, squash, lift := motionFor(true, 800*time.Millisecond, ReactionFace, 100*time.Millisecond)
+	if bob != 0 || squash != 0 || lift != 0 {
+		t.Fatalf("reduce motion transforms = (%v, %v, %v), want zeros", bob, squash, lift)
+	}
+	if got := displayFrame(ActivityAwake, 0, ReactionFace, 100*time.Millisecond, true); got != frameClosed {
+		t.Fatalf("reduce motion face frame = %v, want closed", got)
+	}
+	if got := displayFrame(ActivityAwake, 0, ReactionHeadPat, 100*time.Millisecond, true); got != frameHalfClosed {
+		t.Fatalf("reduce motion head-pat frame = %v, want half closed", got)
+	}
+
+	bob, squash, lift = motionFor(false, bobPeriod/4, ReactionFace, 100*time.Millisecond)
+	if bob == 0 || squash == 0 || lift != 0 {
+		t.Fatalf("normal transforms = (%v, %v, %v), want bob and face squash", bob, squash, lift)
+	}
+	if got := displayFrame(ActivityAwake, 0, ReactionFace, 100*time.Millisecond, false); got != frameOpen {
+		t.Fatalf("normal face frame = %v, want open", got)
+	}
+}
+
+func TestInteractionsRequestInvalidation(t *testing.T) {
+	m := &Model{}
+	calls := 0
+	m.SetInvalidator(func() { calls++ })
+	m.React(ReactionFace)
+	m.DragStarted()
+	m.DragEnded()
+	if calls != 3 {
+		t.Fatalf("invalidations = %d, want 3", calls)
 	}
 }
 

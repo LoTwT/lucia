@@ -45,6 +45,9 @@ func newPetWindow(model *pet.Model, quitting func() bool, visible bool) *petWind
 		StateKey: "pet",
 		Content:  mgui.View(model.View),
 	})
+	// A click or drag can change the pet while it is resting between
+	// scheduled frames; ask for that frame explicitly.
+	model.SetInvalidator(p.win.Invalidate)
 	// Closing the pet hides it; only the tray's quit closes the app.
 	p.win.OnClose(func(e *mygo.CloseEvent) {
 		if quitting() {
