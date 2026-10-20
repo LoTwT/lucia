@@ -58,9 +58,9 @@ func (b *bubbleWindow) Show(reaction pet.Reaction, petRect pet.Rect, displays []
 		return
 	}
 	b.seq++
-	b.model.SetText(text)
-	rect := pet.PlaceBubble(petRect, displays)
-	b.win.SetPosition(rect.X, rect.Y)
+	placement := pet.PlaceBubble(petRect, displays)
+	b.model.SetContent(text, placement.Side, placement.TailX)
+	b.win.SetPosition(placement.X, placement.Y)
 	b.win.Update(func() {})
 	b.win.ShowInactive()
 	b.win.SetIgnoreMouseEvents(true)
