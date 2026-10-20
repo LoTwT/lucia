@@ -62,11 +62,12 @@ const (
 // decides which frame and bob offset to show, so there is no ticker or
 // background goroutine to stop.
 type Model struct {
-	frames   [3]*ui.Bitmap
-	start    time.Time
-	tapAt    time.Time
-	tapReady bool
-	reaction Reaction
+	frames     [3]*ui.Bitmap
+	start      time.Time
+	tapAt      time.Time
+	tapReady   bool
+	reaction   Reaction
+	onReaction func(Reaction)
 }
 
 // New decodes the embedded frames. Failing here means the build's embedded
@@ -97,12 +98,19 @@ const (
 	ReactionHeadPat
 )
 
+// SetReactionHandler installs the UI-thread callback for reactions. The
+// bubble window uses it to choose the line that belongs to the interaction.
+func (m *Model) SetReactionHandler(fn func(Reaction)) { m.onReaction = fn }
+
 // React starts the squash-and-recover reaction. It is safe to call from the
 // UI thread's click and menu actions; the next view build turns the request
 // into a timestamp from the UI clock.
 func (m *Model) React(reaction Reaction) {
 	m.reaction = reaction
 	m.tapReady = true
+	if m.onReaction != nil {
+		m.onReaction(reaction)
+	}
 }
 
 // View draws the pet on a transparent root. The face is a click target and

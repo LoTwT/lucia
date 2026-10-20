@@ -99,10 +99,11 @@ func main() {
 	})
 
 	var (
-		win      *mygo.Window
-		petWin   *petWindow
-		tray     *mygo.Tray
-		quitting bool
+		win       *mygo.Window
+		petWin    *petWindow
+		bubbleWin *bubbleWindow
+		tray      *mygo.Tray
+		quitting  bool
 	)
 	showWindow := func() {
 		if win == nil || win.IsDestroyed() {
@@ -112,9 +113,13 @@ func main() {
 		win.Focus()
 	}
 	togglePet := func() {
-		if petWin != nil {
-			petWin.Toggle()
+		if petWin == nil {
+			return
 		}
+		if petWin.IsVisible() {
+			bubbleWin.Hide()
+		}
+		petWin.Toggle()
 	}
 
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { quitting = true })
@@ -171,6 +176,15 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		petWin = newPetWindow(petModel, func() bool { return quitting })
+		bubbleWin = newBubbleWindow()
+		petWin.SetOnMove(func() { bubbleWin.Hide() })
+		petWin.SetOnHide(func() { bubbleWin.Hide() })
+		petModel.SetReactionHandler(func(reaction pet.Reaction) {
+			if petWin == nil || !petWin.IsVisible() {
+				return
+			}
+			bubbleWin.Show(reaction, petWin.Rect(), currentPetDisplays())
+		})
 
 		win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "Lucia",

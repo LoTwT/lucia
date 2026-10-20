@@ -105,6 +105,19 @@ func TestTapAmount(t *testing.T) {
 	}
 }
 
+func TestReactionHandlerReceivesReaction(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Reaction
+	m.SetReactionHandler(func(reaction Reaction) { got = reaction })
+	m.React(ReactionHeadPat)
+	if got != ReactionHeadPat {
+		t.Fatalf("handler reaction = %v, want ReactionHeadPat", got)
+	}
+}
+
 func TestClickFaceStartsReaction(t *testing.T) {
 	m, err := New()
 	if err != nil {

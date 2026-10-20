@@ -13,7 +13,9 @@ import (
 // reachable. The console and tray live in main.go; keeping this wiring here
 // leaves room for the bubble window without turning main into a window module.
 type petWindow struct {
-	win *mygo.Window
+	win    *mygo.Window
+	onMove func()
+	onHide func()
 }
 
 func newPetWindow(model *pet.Model, quitting func() bool) *petWindow {
@@ -45,7 +47,7 @@ func newPetWindow(model *pet.Model, quitting func() bool) *petWindow {
 			return
 		}
 		e.PreventDefault()
-		p.win.Hide()
+		p.Hide()
 	})
 	// DragWindow's double click asks macOS to zoom the window, even though a
 	// pet has no meaningful maximized state. Undo it at once.
@@ -57,6 +59,9 @@ func newPetWindow(model *pet.Model, quitting func() bool) *petWindow {
 	// the edge and at the display seam.
 	var clampWatching atomic.Bool
 	p.win.OnMove(func() {
+		if p.onMove != nil {
+			p.onMove()
+		}
 		x, y := p.win.Position()
 		if _, changed := pet.KeepOnScreen(pet.Rect{
 			X: x, Y: y, Width: pet.Size, Height: pet.Size,
@@ -97,7 +102,7 @@ func (p *petWindow) Toggle() {
 		return
 	}
 	if p.win.IsVisible() {
-		p.win.Hide()
+		p.Hide()
 		return
 	}
 	p.win.ShowInactive()
@@ -108,6 +113,9 @@ func (p *petWindow) Hide() {
 		return
 	}
 	p.win.Hide()
+	if p.onHide != nil {
+		p.onHide()
+	}
 }
 
 func (p *petWindow) ShowInactive() {
@@ -120,6 +128,17 @@ func (p *petWindow) ShowInactive() {
 func (p *petWindow) IsVisible() bool {
 	return p != nil && p.win != nil && !p.win.IsDestroyed() && p.win.IsVisible()
 }
+
+func (p *petWindow) Rect() pet.Rect {
+	if p == nil || p.win == nil || p.win.IsDestroyed() {
+		return pet.Rect{Width: pet.Size, Height: pet.Size}
+	}
+	x, y := p.win.Position()
+	return pet.Rect{X: x, Y: y, Width: pet.Size, Height: pet.Size}
+}
+
+func (p *petWindow) SetOnMove(fn func()) { p.onMove = fn }
+func (p *petWindow) SetOnHide(fn func()) { p.onHide = fn }
 
 func (p *petWindow) clampOutside() {
 	if p == nil || p.win == nil || p.win.IsDestroyed() {
