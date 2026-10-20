@@ -14,7 +14,7 @@ const (
 	BubbleHeight     = 100
 	bubbleGap        = 8
 	bubbleInset      = 6
-	bubbleTailHeight = 8
+	bubbleTailHeight = 14
 	bubbleTailHalf   = 9
 	bubbleCardRadius = 18
 )
@@ -61,7 +61,7 @@ func (b *BubbleModel) Text() string { return b.text }
 func (b *BubbleModel) View(c *ui.Context) {
 	c.Root().Background(ui.Transparent)
 
-	top, bottom := float32(bubbleInset), float32(bubbleInset+bubbleTailHeight)
+	top, bottom := float32(bubbleInset), float32(bubbleTailHeight)
 	if b.side == BubbleBelow {
 		top, bottom = bottom, top
 	}
