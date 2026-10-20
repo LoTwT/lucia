@@ -225,14 +225,11 @@ func main() {
 			if prefs.SoundEnabled {
 				playPetSound(petSound)
 			}
-			cooldown := prefs.BubbleCooldownSeconds
-			if cooldown < 0 {
+			now := time.Now()
+			if !bubbleAllowed(now, lastBubble, prefs.BubbleCooldownSeconds) {
 				return
 			}
-			if cooldown > 0 && time.Since(lastBubble) < time.Duration(cooldown)*time.Second {
-				return
-			}
-			lastBubble = time.Now()
+			lastBubble = now
 			bubbleWin.Show(reaction, petWin.Rect(), currentPetDisplays())
 		})
 
