@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/LoTwT/lucia/internal/apppaths"
 	"github.com/LoTwT/lucia/internal/buildinfo"
@@ -86,20 +87,28 @@ func main() {
 	}
 
 	var (
-		win       *mygo.Window
-		petWin    *petWindow
-		bubbleWin *bubbleWindow
-		tray      *mygo.Tray
-		quitting  bool
+		win        *mygo.Window
+		petWin     *petWindow
+		bubbleWin  *bubbleWindow
+		tray       *mygo.Tray
+		quitting   bool
+		lastBubble time.Time
 	)
+	petSound := newPetSound()
 	model := appui.New(appui.Config{
-		Version:          info.Version,
-		Commit:           info.CommitLabel(),
-		Platform:         buildinfo.Platform(),
-		DataDir:          paths.Data,
-		Updates:          manager,
-		Settings:         prefs,
-		SaveSettings:     func(s settings.Settings) error { return settings.Save(paths.Data, s) },
+		Version:  info.Version,
+		Commit:   info.CommitLabel(),
+		Platform: buildinfo.Platform(),
+		DataDir:  paths.Data,
+		Updates:  manager,
+		Settings: prefs,
+		SaveSettings: func(s settings.Settings) error {
+			if err := settings.Save(paths.Data, s); err != nil {
+				return err
+			}
+			prefs = s
+			return nil
+		},
 		ApplyPetVisible:  func(visible bool) { petWin.SetVisible(visible) },
 		OpenAtLogin:      func() bool { return mygo.App.OpenAtLogin() },
 		SetOpenAtLogin:   func(open bool) error { return mygo.App.SetOpenAtLogin(open) },
@@ -209,6 +218,17 @@ func main() {
 			if petWin == nil || !petWin.IsVisible() {
 				return
 			}
+			if prefs.SoundEnabled {
+				playPetSound(petSound)
+			}
+			cooldown := prefs.BubbleCooldownSeconds
+			if cooldown < 0 {
+				return
+			}
+			if cooldown > 0 && time.Since(lastBubble) < time.Duration(cooldown)*time.Second {
+				return
+			}
+			lastBubble = time.Now()
 			bubbleWin.Show(reaction, petWin.Rect(), currentPetDisplays())
 		})
 

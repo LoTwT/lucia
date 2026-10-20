@@ -66,9 +66,29 @@ func TestOverviewShowsPetControls(t *testing.T) {
 		ResetPetPosition: func() {},
 	})
 	tt := ui.NewTester(model.View, 1000, 700)
-	for _, want := range []string{"桌宠", "显示桌宠", "开机自启", "重置桌宠位置"} {
+	for _, want := range []string{"桌宠", "显示桌宠", "互动音效", "气泡频率", "开机自启", "重置桌宠位置"} {
 		if !tt.HasText(want) {
 			t.Errorf("overview does not show %q; texts: %v", want, tt.Texts())
+		}
+	}
+}
+
+func TestBubbleChoiceMapping(t *testing.T) {
+	tests := []struct {
+		seconds int
+		choice  string
+	}{
+		{seconds: -1, choice: "关闭"},
+		{seconds: 0, choice: "每次互动"},
+		{seconds: 30, choice: "最多每 30 秒"},
+		{seconds: 120, choice: "最多每 2 分钟"},
+	}
+	for _, tt := range tests {
+		if got := bubbleChoiceFor(tt.seconds); got != tt.choice {
+			t.Errorf("bubbleChoiceFor(%d) = %q, want %q", tt.seconds, got, tt.choice)
+		}
+		if got := bubbleSeconds(tt.choice); got != tt.seconds {
+			t.Errorf("bubbleSeconds(%q) = %d, want %d", tt.choice, got, tt.seconds)
 		}
 	}
 }

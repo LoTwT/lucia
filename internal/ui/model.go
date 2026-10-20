@@ -69,14 +69,17 @@ type Model struct {
 	// openAtLogin mirrors the system login item while the console is open.
 	openAtLogin      bool
 	openAtLoginKnown bool
+	// bubbleChoice is the label selected in the bubble frequency control.
+	bubbleChoice string
 }
 
 // New creates the window model on the overview page.
 func New(cfg Config) *Model {
 	return &Model{
-		cfg:      cfg,
-		page:     PageOverview,
-		settings: cfg.Settings,
+		cfg:          cfg,
+		page:         PageOverview,
+		settings:     cfg.Settings,
+		bubbleChoice: bubbleChoiceFor(cfg.Settings.BubbleCooldownSeconds),
 	}
 }
 
@@ -192,6 +195,34 @@ func (m *Model) overviewPage(c *ui.Context) {
 	})
 }
 
+var bubbleChoices = []string{"每次互动", "最多每 30 秒", "最多每 2 分钟", "关闭"}
+
+func bubbleChoiceFor(seconds int) string {
+	switch {
+	case seconds < 0:
+		return "关闭"
+	case seconds >= 120:
+		return "最多每 2 分钟"
+	case seconds >= 30:
+		return "最多每 30 秒"
+	default:
+		return "每次互动"
+	}
+}
+
+func bubbleSeconds(choice string) int {
+	switch choice {
+	case "关闭":
+		return -1
+	case "最多每 2 分钟":
+		return 120
+	case "最多每 30 秒":
+		return 30
+	default:
+		return 0
+	}
+}
+
 // SetPetVisible keeps the console's copy in sync when the tray toggles the
 // pet. It also persists the new state.
 func (m *Model) SetPetVisible(visible bool) {
@@ -217,6 +248,27 @@ func (m *Model) petCard(c *ui.Context) {
 					m.cfg.ApplyPetVisible(m.settings.PetVisible)
 				}
 			})
+		})
+
+		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+			ui.Column(c).Gap(2).Grow(1).Children(func() {
+				ui.Text(c, "互动音效").FontSize(14)
+				ui.Text(c, "摸脸和摸摸头时播放一段轻短的提示音，默认关闭。").FontSize(12).
+					TextColor(t.TextMuted)
+			})
+			ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(m.saveSettings)
+		})
+
+		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+			ui.Column(c).Gap(2).Grow(1).Children(func() {
+				ui.Text(c, "气泡频率").FontSize(14)
+				ui.Text(c, "限制两次台词气泡之间的最短间隔；关闭后只保留动作和音效。").FontSize(12).
+					TextColor(t.TextMuted)
+			})
+			if ui.Select(c, &m.bubbleChoice, bubbleChoices).Label("气泡频率").Width(170).Changed() {
+				m.settings.BubbleCooldownSeconds = bubbleSeconds(m.bubbleChoice)
+				m.saveSettings()
+			}
 		})
 
 		if m.cfg.OpenAtLogin != nil && m.cfg.SetOpenAtLogin != nil {

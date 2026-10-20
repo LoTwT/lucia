@@ -23,6 +23,12 @@ type Settings struct {
 	// PetVisible keeps the desktop pet on screen across launches. Hiding
 	// it leaves the tray and console available.
 	PetVisible bool `json:"petVisible"`
+	// SoundEnabled plays a short generated sound on interactions. It is
+	// off by default so a new install does not surprise the user.
+	SoundEnabled bool `json:"soundEnabled"`
+	// BubbleCooldownSeconds limits how often a speech bubble appears:
+	// 0 every interaction, a positive number the minimum gap, -1 off.
+	BubbleCooldownSeconds int `json:"bubbleCooldownSeconds"`
 }
 
 // Default returns the preferences of a first launch.
