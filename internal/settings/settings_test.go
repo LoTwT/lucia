@@ -3,6 +3,7 @@ package settings
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -33,8 +34,11 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o644 {
-		t.Errorf("permissions %o, want 644", perm)
+	// Windows does not model Unix permission bits; its ACLs decide access.
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o644 {
+			t.Errorf("permissions %o, want 644", perm)
+		}
 	}
 }
 
