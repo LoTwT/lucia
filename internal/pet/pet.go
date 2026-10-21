@@ -108,6 +108,16 @@ type Model struct {
 	reaction        Reaction
 	onReaction      func(Reaction)
 	onInvalidate    func()
+	menuActions     MenuActions
+}
+
+// MenuActions are the application-level actions offered by the pet's
+// context menu. Nil fields hide their item, which keeps the pure pet view
+// usable in tests without the application shell.
+type MenuActions struct {
+	OpenSettings func()
+	Hide         func()
+	Reset        func()
 }
 
 // New decodes the embedded frames. Failing here means the build's embedded
@@ -152,6 +162,10 @@ func (m *Model) invalidate() {
 		m.onInvalidate()
 	}
 }
+
+// SetMenuActions installs the application actions shown in the context
+// menu. The pet package does not own windows, settings, or visibility.
+func (m *Model) SetMenuActions(actions MenuActions) { m.menuActions = actions }
 
 // React starts the squash-and-recover reaction. It is safe to call from the
 // UI thread's click and menu actions; the next view build turns the request
@@ -219,6 +233,19 @@ func (m *Model) View(c *ui.Context) {
 	outer.ContextMenu(func(menu *ui.Menu) {
 		if menu.Item("摸摸头").Chosen() {
 			m.React(ReactionHeadPat)
+		}
+		if m.menuActions.OpenSettings == nil && m.menuActions.Hide == nil && m.menuActions.Reset == nil {
+			return
+		}
+		menu.Separator()
+		if m.menuActions.OpenSettings != nil && menu.Item("桌宠设置…").Chosen() {
+			m.menuActions.OpenSettings()
+		}
+		if m.menuActions.Hide != nil && menu.Item("隐藏宠物").Chosen() {
+			m.menuActions.Hide()
+		}
+		if m.menuActions.Reset != nil && menu.Item("重置位置").Chosen() {
+			m.menuActions.Reset()
 		}
 	})
 	outer.Children(func() {

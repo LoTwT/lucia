@@ -135,6 +135,19 @@ func TestSidebarNavigatesToUpdatesAndAbout(t *testing.T) {
 	}
 }
 
+func TestShowOverviewReturnsToPetSettings(t *testing.T) {
+	model, _ := newTestModel(t, fakeSource{})
+	model.page = PageAbout
+	model.ShowOverview()
+	if model.page != PageOverview {
+		t.Fatalf("page %q, want overview", model.page)
+	}
+	tt := ui.NewTester(model.View, 1000, 700)
+	if !tt.HasText("显示桌宠") {
+		t.Fatalf("overview does not show pet settings; texts: %v", tt.Texts())
+	}
+}
+
 func TestAvailableUpdateShowsNotesAndInstall(t *testing.T) {
 	date := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	src := fakeSource{release: &updates.Release{

@@ -218,6 +218,14 @@ func main() {
 			bubbleWin.Hide()
 		})
 		petWin.SetOnDragEnd(func() { petModel.DragEnded() })
+		petModel.SetMenuActions(pet.MenuActions{
+			OpenSettings: func() {
+				model.ShowOverview()
+				showWindow()
+			},
+			Hide:  togglePet,
+			Reset: resetPet,
+		})
 		petModel.SetReactionHandler(func(reaction pet.Reaction) {
 			if petWin == nil || !petWin.IsVisible() {
 				return

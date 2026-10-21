@@ -118,6 +118,10 @@ func (m *Model) View(c *ui.Context) {
 	})
 }
 
+// ShowOverview switches to the page that holds the pet settings. The pet's
+// context menu uses it before bringing the console forward.
+func (m *Model) ShowOverview() { m.page = PageOverview }
+
 // ShowUpdates switches to the updates page and starts a check when there is
 // no current result to show. The application menu calls it.
 func (m *Model) ShowUpdates() {

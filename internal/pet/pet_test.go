@@ -394,6 +394,53 @@ func TestContextMenuStartsReaction(t *testing.T) {
 	}
 }
 
+func TestContextMenuApplicationActions(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	m.SetMenuActions(MenuActions{
+		OpenSettings: func() { calls = append(calls, "settings") },
+		Hide:         func() { calls = append(calls, "hide") },
+		Reset:        func() { calls = append(calls, "reset") },
+	})
+	tt := ui.NewTester(m.View, Size, Size)
+	tt.Frame()
+
+	tt.RightClickAt(124, 200)
+	items := tt.Menu()
+	for _, want := range []string{"摸摸头", "-", "桌宠设置…", "隐藏宠物", "重置位置"} {
+		found := false
+		for _, item := range items {
+			if item == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("context menu has no %q; items: %v", want, items)
+		}
+	}
+	tt.CloseMenu()
+
+	for _, label := range []string{"桌宠设置…", "隐藏宠物", "重置位置"} {
+		tt.RightClickAt(124, 200)
+		if err := tt.ChooseMenuItem(label); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"settings", "hide", "reset"}
+	if len(calls) != len(want) {
+		t.Fatalf("menu actions = %v, want %v", calls, want)
+	}
+	for i := range want {
+		if calls[i] != want[i] {
+			t.Fatalf("menu actions = %v, want %v", calls, want)
+		}
+	}
+}
+
 func TestTrayIconIsPNG(t *testing.T) {
 	icon, err := png.Decode(bytes.NewReader(TrayIcon()))
 	if err != nil {
