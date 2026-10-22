@@ -20,7 +20,7 @@
 
 **相关代码**：`internal/pet/pet.go` 的透明根节点；`docs/specs/desktop-pet.md` 的风险与回退。
 
-**当前规避**：宠物窗口保持贴合立绘；气泡使用独立的整窗鼠标穿透窗口。
+**当前规避**：宠物窗口保持贴合立绘；气泡使用独立的整窗鼠标穿透窗口。MyGo v0.5.5 的 Linux 后端 `SetIgnoreMouseEvents` 是空实现，因此 Lucia 在 Linux 上不显示气泡；Linux 不在当前发布矩阵内。
 
 ## 2. 原生拖动会话的开始/结束回调
 
