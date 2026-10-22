@@ -14,10 +14,11 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 | `internal/diagnostics` | 文件优先、stderr 镜像的诊断日志与大小轮转。 |
 | `internal/settings` | `settings.json` 的默认值、容错读取与原子写入。 |
 | `internal/updates` | 更新状态机；`MyGo` 适配器把 `mygo.Updater` 接到 `Source` 接口。 |
+| `internal/pet` | 桌宠立绘、idle 动画、点击反应、气泡模型与位置规则；素材用 `go:embed` 进入二进制。 |
 | `internal/ui` | 主窗口模型、侧栏与三个页面（概览、更新、关于），以及 `ui.NewTester` 视图测试。 |
 | `resources/` | 应用图标与需要随包分发的资源；MyGo 在打包时合并到应用资源根。 |
 
-依赖方向：`cmd` → `internal/*`；`internal/ui` 只依赖 `internal/settings` 与 `internal/updates`；`internal/updates` 是唯一直接调用 `mygo.Updater` 的包。这样更新逻辑可以脱离窗口与真实网络做单元测试。
+依赖方向：`cmd` → `internal/*`；`internal/ui` 只依赖 `internal/settings` 与 `internal/updates`；`internal/pet` 只依赖 MyGo 的 `ui` 包与标准库；`internal/updates` 是唯一直接调用 `mygo.Updater` 的包。这样更新逻辑和桌宠动画都可以脱离窗口与真实网络做单元测试。
 
 ## 2. 启动顺序
 
@@ -29,9 +30,9 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 4. `RequestSingleInstanceLock`；第二个实例把命令行交给第一个实例后直接退出，不接触日志与数据文件。
 5. 打开诊断日志，写入首行 `version=… commit=… platform=… data=… logs=…`。打不开日志不阻止启动。
 6. 读取设置。文件缺失用默认值；文件损坏记录原因并继续用默认值。
-7. 构造更新管理器，把 `CheckUpdatesOnLaunch` 同步到管理器的自动检查开关。
-8. 注册单实例、激活与 `lucia://` 深链接回调；设置应用菜单。
-9. `WhenReady` 中创建窗口，接上管理器的重绘与安装完成回调，再启动自动检查循环。
+7. 构造更新管理器，把 `CheckUpdatesOnLaunch` 同步到管理器的自动检查开关；构造 `internal/pet` 模型并解码内嵌立绘，素材损坏则退出。
+8. 注册单实例、激活、`lucia://` 深链接、退出前与最后窗口关闭回调；设置应用菜单。
+9. `WhenReady` 中创建桌宠窗口、默认隐藏的气泡窗口与默认隐藏的控制台窗口，创建托盘，接上管理器的重绘与安装完成回调，再启动自动检查循环。
 10. `App.Run`。退出后记录 `exited`。
 
 窗口回调只做界面工作；更新检查、下载与安装在独立 goroutine 中运行，结果通过 `Window.Update` 回到 UI 线程。
@@ -46,7 +47,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 
 开发运行由 MyGo 命名为 `Lucia Dev`，因此数据、日志、窗口状态与正式版天然隔离。Windows 使用 `%LOCALAPPDATA%` 而不是漫游 `%APPDATA%`：更新状态与本地数据不应被漫游配置文件或组织策略跨机器同步。
 
-设置文件为数据目录下的 `settings.json`，采用临时文件加改名写入，崩溃不会留下半个 JSON。窗口位置由 MyGo 按 `StateKey: "main"` 存在同一数据根。
+设置文件为数据目录下的 `settings.json`，采用临时文件加改名写入，崩溃不会留下半个 JSON。加载时先取 `Default()` 再反序列化，旧文件缺少新字段时保留默认值。当前持久化 `checkUpdatesOnLaunch`、`petVisible`、`soundEnabled` 与 `bubbleCooldownSeconds`；开机自启由 MyGo 的登录项接口管理，不重复落盘。窗口位置由 MyGo 按 `StateKey` 存在同一数据根：控制台为 `"main"`，桌宠为 `"pet"`，气泡不设 `StateKey`。
 
 ## 4. 更新状态机
 
@@ -85,9 +86,11 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 - Windows 目标为 `windows/amd64`，MyGo 生成 NSIS 每用户安装包。
 - 本应用不需要 cgo，因此 MyGo 默认的 `CGO_ENABLED=0` 可以直接使用；这一点与 youkai 的 OCR 构建不同。
 - 发布版本来自标签而不是提交中的版本号：workflow 在检出副本里写入标签版本与渠道前缀，并用 `git update-index --skip-worktree` 让构建提交号保持干净。
+- 桌宠立绘通过 `go:embed` 进入二进制。美术素材不适用代码许可，来源与 CC BY-NC-SA 4.0 条件见 `internal/pet/assets/deepseek-whale/NOTICE.md`。
 
 ## 7. 明确不包含
 
 - 不包含 Web 前端、浏览器内 UI 或 TypeScript 绑定。
-- 不包含托盘常驻、关窗隐藏或多窗口管理；窗口关闭即退出。
+- 当前包含托盘常驻，以及桌宠、气泡与控制台三个窗口；关窗只隐藏，退出由托盘或 Cmd+Q 发起。
+- 桌宠当前包含半身立绘的 idle 呼吸/眨眼（按状态调度帧并遵循 Reduce Motion）、拖动、脸部点击压扁回弹、右键“摸摸头”和带尾巴的独立气泡台词；不包含桌面走动、AI 对话、皮肤系统或多只宠物，这些在后续增量中设计。
 - 不包含业务数据、账号体系或服务端。Lucia 当前是可运行、可发布的应用底座。

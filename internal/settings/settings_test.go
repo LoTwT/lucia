@@ -15,11 +15,44 @@ func TestLoadMissingUsesDefaults(t *testing.T) {
 	if !got.CheckUpdatesOnLaunch {
 		t.Error("a first launch must check for updates")
 	}
+	if !got.PetVisible {
+		t.Error("a first launch must show the pet")
+	}
+	if got.SoundEnabled {
+		t.Error("a first launch must not play interaction sounds")
+	}
+	if got.BubbleCooldownSeconds != 0 {
+		t.Errorf("bubble cooldown = %d, want 0", got.BubbleCooldownSeconds)
+	}
+}
+
+func TestLoadMergesNewFieldsWithDefaults(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, File), []byte(`{"checkUpdatesOnLaunch":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.CheckUpdatesOnLaunch {
+		t.Error("an explicit false must override the default")
+	}
+	if !got.PetVisible {
+		t.Error("a missing petVisible field must keep the default true")
+	}
+	if got.SoundEnabled || got.BubbleCooldownSeconds != 0 {
+		t.Errorf("missing bubble fields = sound %v, cooldown %d; want false, 0", got.SoundEnabled, got.BubbleCooldownSeconds)
+	}
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	want := Settings{CheckUpdatesOnLaunch: false}
+	want := Default()
+	want.CheckUpdatesOnLaunch = false
+	want.PetVisible = false
+	want.SoundEnabled = true
+	want.BubbleCooldownSeconds = 30
 	if err := Save(dir, want); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -53,5 +86,8 @@ func TestLoadDamagedFileFallsBackToDefaults(t *testing.T) {
 	}
 	if !got.CheckUpdatesOnLaunch {
 		t.Error("a damaged file must apply the defaults")
+	}
+	if !got.PetVisible {
+		t.Error("a damaged file must apply the pet visibility default")
 	}
 }

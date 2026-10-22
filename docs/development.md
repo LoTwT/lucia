@@ -65,11 +65,12 @@ lucia: self-test: version=0.0.1 commit=0123456789ab platform=darwin/arm64 update
 - `internal/apppaths`：三平台目录解析与 Windows 本地数据回退。
 - `internal/buildinfo`：提交缩写、`-modified` 标记与版本回退。
 - `internal/diagnostics`：追加写入、stderr 失败不影响文件、轮转顺序。
-- `internal/settings`：默认值、原子写入往返、损坏文件回退。
+- `internal/settings`：默认值合并、旧文件新增字段迁移、原子写入往返、损坏文件回退。
 - `internal/updates`：禁用构建不联网、检查结果、失败可见、并发拒绝、安装进度、安装失败保留重试、自动检查启动。
+- `internal/pet`：内嵌立绘解码、眨眼帧选择、点击反应曲线、脸部点击区、身体拖动区、右键菜单、气泡台词与定位、透明根节点、可见像素、动画请求、托盘图标尺寸，以及窗口位置约束。
 - `internal/ui`：概览构建信息、侧栏页面切换、可用更新显示说明与安装按钮、禁用构建的解释。
 
-视图测试不打开窗口，但会执行真实布局与点击；`ui.NewTester` 对重复 key 与生命周期错误是严格的。
+视图测试不打开窗口，但会执行真实布局与点击；`ui.NewTester` 对重复 key 与生命周期错误是严格的。位置约束和气泡定位是纯几何测试；桌宠的透明、置顶、拖动、跨屏、气泡穿透与托盘必须另做真机验收，测试器不能代替窗口行为。
 
 ## 数据与日志
 

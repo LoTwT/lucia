@@ -20,11 +20,23 @@ type Settings struct {
 	// keeps checking while it runs. Turning it off leaves the manual
 	// "检查更新" action available.
 	CheckUpdatesOnLaunch bool `json:"checkUpdatesOnLaunch"`
+	// PetVisible keeps the desktop pet on screen across launches. Hiding
+	// it leaves the tray and console available.
+	PetVisible bool `json:"petVisible"`
+	// SoundEnabled plays a short generated sound on interactions. It is
+	// off by default so a new install does not surprise the user.
+	SoundEnabled bool `json:"soundEnabled"`
+	// BubbleCooldownSeconds limits how often a speech bubble appears:
+	// 0 every interaction, a positive number the minimum gap, -1 off.
+	BubbleCooldownSeconds int `json:"bubbleCooldownSeconds"`
 }
 
 // Default returns the preferences of a first launch.
 func Default() Settings {
-	return Settings{CheckUpdatesOnLaunch: true}
+	return Settings{
+		CheckUpdatesOnLaunch: true,
+		PetVisible:           true,
+	}
 }
 
 // Load reads the settings in dir. A missing file returns the defaults and
@@ -39,7 +51,9 @@ func Load(dir string) (Settings, error) {
 		}
 		return Default(), fmt.Errorf("read %q: %w", path, err)
 	}
-	var s Settings
+	// Start from defaults so fields added after an older file was written
+	// keep their intended default instead of decoding as the zero value.
+	s := Default()
 	if err := json.Unmarshal(data, &s); err != nil {
 		return Default(), fmt.Errorf("parse %q: %w", path, err)
 	}

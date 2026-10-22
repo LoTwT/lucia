@@ -37,6 +37,15 @@ type Config struct {
 	// SaveSettings persists a preference change. Nil keeps changes in
 	// memory only (tests).
 	SaveSettings func(settings.Settings) error
+	// ApplyPetVisible shows or hides the desktop pet after the preference
+	// changes. Nil hides the control in tests or embedded hosts.
+	ApplyPetVisible func(bool)
+	// OpenAtLogin reports the login item state. Nil hides the control.
+	OpenAtLogin func() bool
+	// SetOpenAtLogin changes the login item. Nil hides the control.
+	SetOpenAtLogin func(bool) error
+	// ResetPetPosition moves the pet back to its first-launch corner.
+	ResetPetPosition func()
 	// OpenDataDir opens the data root in the system file manager. Nil hides
 	// the action.
 	OpenDataDir func() error
@@ -57,14 +66,20 @@ type Model struct {
 	actionErr string
 	// settingsErr reports a failed preference write.
 	settingsErr string
+	// openAtLogin mirrors the system login item while the console is open.
+	openAtLogin      bool
+	openAtLoginKnown bool
+	// bubbleChoice is the label selected in the bubble frequency control.
+	bubbleChoice string
 }
 
 // New creates the window model on the overview page.
 func New(cfg Config) *Model {
 	return &Model{
-		cfg:      cfg,
-		page:     PageOverview,
-		settings: cfg.Settings,
+		cfg:          cfg,
+		page:         PageOverview,
+		settings:     cfg.Settings,
+		bubbleChoice: bubbleChoiceFor(cfg.Settings.BubbleCooldownSeconds),
 	}
 }
 
@@ -101,6 +116,40 @@ func (m *Model) View(c *ui.Context) {
 			})
 		})
 	})
+}
+
+// ShowOverview switches to the page that holds the pet settings. The pet's
+// context menu uses it before bringing the console forward.
+func (m *Model) ShowOverview() { m.page = PageOverview }
+
+// RefreshOpenAtLogin makes the next view read the system login-item state
+// again, for a console opened after the user changed it outside Lucia.
+func (m *Model) RefreshOpenAtLogin() {
+	if m.cfg.OpenAtLogin != nil {
+		m.openAtLoginKnown = false
+	}
+}
+
+// setOpenAtLogin applies the requested state and falls back to the system's
+// actual state if the platform rejects it.
+func (m *Model) setOpenAtLogin(open bool) {
+	m.openAtLogin = open
+	if m.cfg.SetOpenAtLogin == nil {
+		return
+	}
+	if err := m.cfg.SetOpenAtLogin(open); err != nil {
+		m.settingsErr = fmt.Sprintf("设置开机自启失败：%v", err)
+		if m.cfg.OpenAtLogin != nil {
+			m.openAtLogin = m.cfg.OpenAtLogin()
+			m.openAtLoginKnown = true
+		}
+		return
+	}
+	m.settingsErr = ""
+	if m.cfg.OpenAtLogin != nil {
+		m.openAtLogin = m.cfg.OpenAtLogin()
+		m.openAtLoginKnown = true
+	}
 }
 
 // ShowUpdates switches to the updates page and starts a check when there is
@@ -173,9 +222,112 @@ func (m *Model) pageHeading() (title, subtitle string) {
 
 func (m *Model) overviewPage(c *ui.Context) {
 	m.hero(c)
+	m.petCard(c)
 	ui.Row(c).Gap(16).AlignItems(ui.Stretch).Children(func() {
 		m.statusCard(c)
 		m.updateSummaryCard(c)
+	})
+}
+
+var bubbleChoices = []string{"每次互动", "最多每 30 秒", "最多每 2 分钟", "关闭"}
+
+func bubbleChoiceFor(seconds int) string {
+	switch {
+	case seconds < 0:
+		return "关闭"
+	case seconds >= 120:
+		return "最多每 2 分钟"
+	case seconds >= 30:
+		return "最多每 30 秒"
+	default:
+		return "每次互动"
+	}
+}
+
+func bubbleSeconds(choice string) int {
+	switch choice {
+	case "关闭":
+		return -1
+	case "最多每 2 分钟":
+		return 120
+	case "最多每 30 秒":
+		return 30
+	default:
+		return 0
+	}
+}
+
+// SetPetVisible keeps the console's copy in sync when the tray toggles the
+// pet. It also persists the new state.
+func (m *Model) SetPetVisible(visible bool) {
+	if m.settings.PetVisible == visible {
+		return
+	}
+	m.settings.PetVisible = visible
+	m.saveSettings()
+}
+
+func (m *Model) petCard(c *ui.Context) {
+	t := c.Theme()
+	panel(c, "桌宠", func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+			ui.Column(c).Gap(2).Grow(1).Children(func() {
+				ui.Text(c, "显示桌宠").FontSize(14)
+				ui.Text(c, "隐藏后仍可从托盘重新显示；该状态会保留到下次启动。").FontSize(12).
+					TextColor(t.TextMuted)
+			})
+			ui.Switch(c, &m.settings.PetVisible).Label("显示桌宠").OnChange(func() {
+				m.saveSettings()
+				if m.cfg.ApplyPetVisible != nil {
+					m.cfg.ApplyPetVisible(m.settings.PetVisible)
+				}
+			})
+		})
+
+		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+			ui.Column(c).Gap(2).Grow(1).Children(func() {
+				ui.Text(c, "互动音效").FontSize(14)
+				ui.Text(c, "摸脸和摸摸头时播放一段轻短的提示音，默认关闭。").FontSize(12).
+					TextColor(t.TextMuted)
+			})
+			ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(m.saveSettings)
+		})
+
+		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+			ui.Column(c).Gap(2).Grow(1).Children(func() {
+				ui.Text(c, "气泡频率").FontSize(14)
+				ui.Text(c, "限制两次台词气泡之间的最短间隔；关闭后只保留动作和音效。").FontSize(12).
+					TextColor(t.TextMuted)
+			})
+			if ui.Select(c, &m.bubbleChoice, bubbleChoices).Label("气泡频率").Width(170).Changed() {
+				m.settings.BubbleCooldownSeconds = bubbleSeconds(m.bubbleChoice)
+				m.saveSettings()
+			}
+		})
+
+		if m.cfg.OpenAtLogin != nil && m.cfg.SetOpenAtLogin != nil {
+			if !m.openAtLoginKnown {
+				m.openAtLogin = m.cfg.OpenAtLogin()
+				m.openAtLoginKnown = true
+			}
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "开机自启").FontSize(14)
+					ui.Text(c, "登录系统后自动启动 Lucia 和桌宠。").FontSize(12).TextColor(t.TextMuted)
+				})
+				ui.Switch(c, &m.openAtLogin).Label("开机自启").OnChange(func() {
+					m.setOpenAtLogin(m.openAtLogin)
+				})
+			})
+		}
+
+		if m.cfg.ResetPetPosition != nil {
+			if ui.Button(c, "重置桌宠位置").Clicked() {
+				m.settings.PetVisible = true
+				m.saveSettings()
+				m.cfg.ResetPetPosition()
+			}
+		}
 	})
 }
 

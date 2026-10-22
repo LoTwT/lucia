@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/LoTwT/lucia/internal/apppaths"
 	"github.com/LoTwT/lucia/internal/buildinfo"
 	"github.com/LoTwT/lucia/internal/diagnostics"
+	"github.com/LoTwT/lucia/internal/pet"
 	"github.com/LoTwT/lucia/internal/settings"
 	appui "github.com/LoTwT/lucia/internal/ui"
 	"github.com/LoTwT/lucia/internal/updates"
@@ -79,31 +81,89 @@ func main() {
 	manager := updates.New(updates.MyGo{}, info.Version)
 	manager.SetAutoCheck(prefs.CheckUpdatesOnLaunch)
 
+	petModel, err := pet.New()
+	if err != nil {
+		log.Fatalf("lucia: pet assets: %v", err)
+	}
+
+	var (
+		win        *mygo.Window
+		petWin     *petWindow
+		bubbleWin  *bubbleWindow
+		tray       *mygo.Tray
+		quitting   bool
+		lastBubble time.Time
+	)
+	petSound := newPetSound()
 	model := appui.New(appui.Config{
-		Version:       info.Version,
-		Commit:        info.CommitLabel(),
-		Platform:      buildinfo.Platform(),
-		DataDir:       paths.Data,
-		Updates:       manager,
-		Settings:      prefs,
-		SaveSettings:  func(s settings.Settings) error { return settings.Save(paths.Data, s) },
+		Version:  info.Version,
+		Commit:   info.CommitLabel(),
+		Platform: buildinfo.Platform(),
+		DataDir:  paths.Data,
+		Updates:  manager,
+		Settings: prefs,
+		SaveSettings: func(s settings.Settings) error {
+			if err := settings.Save(paths.Data, s); err != nil {
+				return err
+			}
+			prefs = s
+			return nil
+		},
+		ApplyPetVisible: func(visible bool) { petWin.SetVisible(visible) },
+		OpenAtLogin:     func() bool { return mygo.App.OpenAtLogin() },
+		SetOpenAtLogin:  func(open bool) error { return mygo.App.SetOpenAtLogin(open) },
+		ResetPetPosition: func() {
+			bubbleWin.Hide()
+			petWin.ResetPosition()
+		},
 		OpenDataDir:   func() error { return mygo.Shell.OpenPath(paths.Data) },
 		RepositoryURL: repositoryURL,
 		UpdateSource:  "LoTwT/lucia",
 	})
 
-	var win *mygo.Window
+	syncPetVisible := func(visible bool) {
+		prefs.PetVisible = visible
+		model.SetPetVisible(visible)
+		if win != nil && !win.IsDestroyed() {
+			win.Update(func() {})
+		}
+	}
 	showWindow := func() {
 		if win == nil || win.IsDestroyed() {
 			return
 		}
+		model.RefreshOpenAtLogin()
 		win.Show()
 		win.Focus()
+		win.Update(func() {})
+	}
+	togglePet := func() {
+		if petWin == nil {
+			return
+		}
+		if petWin.IsVisible() {
+			bubbleWin.Hide()
+		}
+		petWin.Toggle()
+		syncPetVisible(petWin.IsVisible())
+	}
+	resetPet := func() {
+		if petWin == nil {
+			return
+		}
+		bubbleWin.Hide()
+		petWin.ResetPosition()
+		syncPetVisible(true)
 	}
 
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { quitting = true })
+	mygo.App.OnWindowAllClosed(func() {})
 	mygo.App.OnSecondInstance(func([]string, string) { showWindow() })
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
-		if !hasVisibleWindows {
+		// Keep the pet as the default face of the app: a click on the Dock
+		// icon opens the console only when neither the pet nor another
+		// window is visible.
+		if !hasVisibleWindows && (petWin == nil || !petWin.IsVisible()) {
 			showWindow()
 		}
 	})
@@ -149,16 +209,83 @@ func main() {
 	defer stopAutoChecks()
 
 	mygo.App.WhenReady(func() {
+		petWin = newPetWindow(petModel, func() bool { return quitting }, prefs.PetVisible)
+		bubbleWin = newBubbleWindow(func() bool { return quitting })
+		petWin.SetOnMove(func() { bubbleWin.Hide() })
+		petWin.SetOnHide(func() {
+			bubbleWin.Hide()
+			syncPetVisible(false)
+		})
+		petWin.SetOnDragStart(func() {
+			petModel.DragStarted()
+			bubbleWin.Hide()
+		})
+		petWin.SetOnDragEnd(func() { petModel.DragEnded() })
+		petModel.SetMenuActions(pet.MenuActions{
+			OpenSettings: func() {
+				model.ShowOverview()
+				showWindow()
+			},
+			Hide:  togglePet,
+			Reset: resetPet,
+		})
+		petModel.SetReactionHandler(func(reaction pet.Reaction) {
+			if petWin == nil || !petWin.IsVisible() {
+				return
+			}
+			if prefs.SoundEnabled {
+				playPetSound(petSound)
+			}
+			now := time.Now()
+			if !bubbleAllowed(now, lastBubble, prefs.BubbleCooldownSeconds) {
+				return
+			}
+			lastBubble = now
+			bubbleWin.Show(reaction, petWin.Rect(), currentPetDisplays())
+		})
+
 		win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "Lucia",
 			Width:     1000,
 			Height:    700,
 			MinWidth:  760,
 			MinHeight: 520,
+			// The console starts hidden; the tray and Dock icon open it.
+			Hidden: true,
 			// Opens where the user left it, keeping the size across launches.
 			StateKey: "main",
 			Content:  mgui.View(model.View),
 		})
+		win.OnClose(func(e *mygo.CloseEvent) {
+			if quitting {
+				return
+			}
+			e.PreventDefault()
+			win.Hide()
+		})
+
+		tray, err = mygo.NewTray(mygo.TrayOptions{
+			Icon:    pet.TrayIcon(),
+			ToolTip: "Lucia 桌宠",
+			Menu: mygo.NewMenu([]*mygo.MenuItem{
+				{Label: "显示/隐藏宠物", Click: func(*mygo.MenuItem, *mygo.Window) { togglePet() }},
+				{Label: "重置宠物位置", Click: func(*mygo.MenuItem, *mygo.Window) { resetPet() }},
+				{Label: "打开 Lucia", Click: func(*mygo.MenuItem, *mygo.Window) { showWindow() }},
+				mygo.Separator(),
+				{Label: "退出", Click: func(*mygo.MenuItem, *mygo.Window) {
+					quitting = true
+					mygo.App.Quit()
+				}},
+			}),
+		})
+		if err != nil {
+			log.Printf("lucia: tray: %v", err)
+		} else {
+			// Keep the tray handle reachable while the app runs; the menu
+			// callbacks above are the user's only way back to the console.
+			_ = tray
+		}
+
 		// Background state changes redraw the window; Update runs the
 		// closure on the UI thread and is safe from the manager's goroutines.
 		manager.SetNotify(func() {

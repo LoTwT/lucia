@@ -2,6 +2,18 @@
 
 Lucia 的二进制包含以下第三方组件。发布制品随包附带本文件。
 
+## DeepSeek 鲸鱼娘桌宠素材
+
+`internal/pet/assets/deepseek-whale/` 下的 PNG 是非官方同人素材，不适用 MIT 许可，仅按 CC BY-NC-SA 4.0 的条件用于非商业桌宠功能。
+
+- 原角色「溟月」：上善无形创作，据公开报道以 CC BY-NC-SA 4.0 开放二创。
+- DeepSeek 女仆鲸鱼娘：B 站用户 ZipZipPipe 在「溟月」基础上的二创。
+- 立绘文件：取自 [shiyi312/DeepSeek-Whale-Desktop-Pet](https://github.com/shiyi312/DeepSeek-Whale-Desktop-Pet)，其上游素材链见 [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)。
+- 授权链风险：直接上游明确不授予 `assets/` 再许可；本文件所依据的 CC BY-NC-SA 4.0 尚缺针对这几张图的一手授权链接。项目所有者已接受非商业使用风险，权利人异议时会移除或替换。
+- 许可全文：<https://creativecommons.org/licenses/by-nc-sa/4.0/>。对图片的裁剪、缩放、拼帧等修改仍按 CC BY-NC-SA 4.0 的条件提供。
+
+Lucia 与 DeepSeek 官方无关联。完整文件映射与移除方式见 [NOTICE.md](../internal/pet/assets/deepseek-whale/NOTICE.md)。
+
 ## MyGo
 
 MIT License

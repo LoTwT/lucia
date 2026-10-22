@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -53,6 +54,96 @@ func TestOverviewShowsBuildIdentity(t *testing.T) {
 	}
 }
 
+func TestOverviewShowsPetControls(t *testing.T) {
+	model := New(Config{
+		Version:          "0.0.1",
+		Commit:           "0123456789ab",
+		Platform:         "darwin/arm64",
+		DataDir:          "/tmp/lucia",
+		Updates:          updates.New(disabledSource{}, "0.0.1"),
+		Settings:         settings.Default(),
+		OpenAtLogin:      func() bool { return false },
+		SetOpenAtLogin:   func(bool) error { return nil },
+		ResetPetPosition: func() {},
+	})
+	tt := ui.NewTester(model.View, 1000, 700)
+	for _, want := range []string{"桌宠", "显示桌宠", "互动音效", "气泡频率", "开机自启", "重置桌宠位置"} {
+		if !tt.HasText(want) {
+			t.Errorf("overview does not show %q; texts: %v", want, tt.Texts())
+		}
+	}
+}
+
+func TestBubbleChoiceMapping(t *testing.T) {
+	tests := []struct {
+		seconds int
+		choice  string
+	}{
+		{seconds: -1, choice: "关闭"},
+		{seconds: 0, choice: "每次互动"},
+		{seconds: 30, choice: "最多每 30 秒"},
+		{seconds: 120, choice: "最多每 2 分钟"},
+	}
+	for _, tt := range tests {
+		if got := bubbleChoiceFor(tt.seconds); got != tt.choice {
+			t.Errorf("bubbleChoiceFor(%d) = %q, want %q", tt.seconds, got, tt.choice)
+		}
+		if got := bubbleSeconds(tt.choice); got != tt.seconds {
+			t.Errorf("bubbleSeconds(%q) = %d, want %d", tt.choice, got, tt.seconds)
+		}
+	}
+}
+
+func TestSetPetVisiblePersists(t *testing.T) {
+	var saved settings.Settings
+	model := New(Config{
+		Version:      "0.0.1",
+		Updates:      updates.New(disabledSource{}, "0.0.1"),
+		Settings:     settings.Default(),
+		SaveSettings: func(s settings.Settings) error { saved = s; return nil },
+	})
+	model.SetPetVisible(false)
+	if model.settings.PetVisible {
+		t.Fatal("model still shows the pet")
+	}
+	if saved.PetVisible {
+		t.Fatal("saved settings still show the pet")
+	}
+}
+
+func TestOpenAtLoginFailureRollsBack(t *testing.T) {
+	model := New(Config{
+		Version:        "0.0.1",
+		Updates:        updates.New(disabledSource{}, "0.0.1"),
+		Settings:       settings.Default(),
+		OpenAtLogin:    func() bool { return false },
+		SetOpenAtLogin: func(bool) error { return errors.New("denied") },
+	})
+	model.openAtLoginKnown = true
+	model.openAtLogin = true
+	model.setOpenAtLogin(true)
+	if model.openAtLogin {
+		t.Fatal("failed login-item write left the switch on")
+	}
+	if model.settingsErr == "" {
+		t.Fatal("failed login-item write did not report an error")
+	}
+}
+
+func TestRefreshOpenAtLogin(t *testing.T) {
+	model := New(Config{
+		Version:     "0.0.1",
+		Updates:     updates.New(disabledSource{}, "0.0.1"),
+		Settings:    settings.Default(),
+		OpenAtLogin: func() bool { return true },
+	})
+	model.openAtLoginKnown = true
+	model.RefreshOpenAtLogin()
+	if model.openAtLoginKnown {
+		t.Fatal("login-item state was not refreshed")
+	}
+}
+
 func TestSidebarNavigatesToUpdatesAndAbout(t *testing.T) {
 	model, _ := newTestModel(t, fakeSource{})
 	tt := ui.NewTester(model.View, 1000, 700)
@@ -75,6 +166,19 @@ func TestSidebarNavigatesToUpdatesAndAbout(t *testing.T) {
 		if !tt.HasText(want) {
 			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
 		}
+	}
+}
+
+func TestShowOverviewReturnsToPetSettings(t *testing.T) {
+	model, _ := newTestModel(t, fakeSource{})
+	model.page = PageAbout
+	model.ShowOverview()
+	if model.page != PageOverview {
+		t.Fatalf("page %q, want overview", model.page)
+	}
+	tt := ui.NewTester(model.View, 1000, 700)
+	if !tt.HasText("显示桌宠") {
+		t.Fatalf("overview does not show pet settings; texts: %v", tt.Texts())
 	}
 }
 
