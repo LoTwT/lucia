@@ -62,8 +62,10 @@ const (
 )
 
 // The face region receives clicks; the rest of the window stays a
-// DragWindow handle so the pet can still be moved.
-var faceRegion = ui.Rect{X: 94, Y: 28, W: 60, H: 64}
+// DragWindow handle so the pet can still be moved. The current artwork is a
+// head-and-shoulders bust, so the clickable face sits in the middle of the
+// window rather than near the top edge.
+var faceRegion = ui.Rect{X: 78, Y: 112, W: 100, H: 76}
 
 type frame uint8
 
@@ -264,7 +266,7 @@ func (m *Model) View(c *ui.Context) {
 		ui.Box(c).Absolute().
 			Left(faceRegion.X).Top(faceRegion.Y).
 			Size(faceRegion.W, faceRegion.H).
-			Label("摸摸头").
+			Label("摸摸脸").
 			Cursor(ui.CursorPointer).
 			OnClick(func() { m.React(ReactionFace) })
 	})

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -107,6 +108,39 @@ func TestSetPetVisiblePersists(t *testing.T) {
 	}
 	if saved.PetVisible {
 		t.Fatal("saved settings still show the pet")
+	}
+}
+
+func TestOpenAtLoginFailureRollsBack(t *testing.T) {
+	model := New(Config{
+		Version:        "0.0.1",
+		Updates:        updates.New(disabledSource{}, "0.0.1"),
+		Settings:       settings.Default(),
+		OpenAtLogin:    func() bool { return false },
+		SetOpenAtLogin: func(bool) error { return errors.New("denied") },
+	})
+	model.openAtLoginKnown = true
+	model.openAtLogin = true
+	model.setOpenAtLogin(true)
+	if model.openAtLogin {
+		t.Fatal("failed login-item write left the switch on")
+	}
+	if model.settingsErr == "" {
+		t.Fatal("failed login-item write did not report an error")
+	}
+}
+
+func TestRefreshOpenAtLogin(t *testing.T) {
+	model := New(Config{
+		Version:     "0.0.1",
+		Updates:     updates.New(disabledSource{}, "0.0.1"),
+		Settings:    settings.Default(),
+		OpenAtLogin: func() bool { return true },
+	})
+	model.openAtLoginKnown = true
+	model.RefreshOpenAtLogin()
+	if model.openAtLoginKnown {
+		t.Fatal("login-item state was not refreshed")
 	}
 }
 

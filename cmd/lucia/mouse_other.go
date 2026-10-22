@@ -1,8 +1,8 @@
-//go:build !darwin
+//go:build !darwin && !windows
 
 package main
 
-// leftMouseButtonDown has no cross-platform MyGo API yet. Windows and Linux
-// fall back to the timed check in the window callback; their drag behavior is
-// validated in the platform follow-up.
+// leftMouseButtonDown has no MyGo API on this platform. Linux falls back to
+// the timed check in the window callback; Linux is not part of the current
+// release matrix.
 func leftMouseButtonDown() (down, ok bool) { return false, false }

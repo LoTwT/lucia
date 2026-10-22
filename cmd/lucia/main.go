@@ -121,12 +121,21 @@ func main() {
 		UpdateSource:  "LoTwT/lucia",
 	})
 
+	syncPetVisible := func(visible bool) {
+		prefs.PetVisible = visible
+		model.SetPetVisible(visible)
+		if win != nil && !win.IsDestroyed() {
+			win.Update(func() {})
+		}
+	}
 	showWindow := func() {
 		if win == nil || win.IsDestroyed() {
 			return
 		}
+		model.RefreshOpenAtLogin()
 		win.Show()
 		win.Focus()
+		win.Update(func() {})
 	}
 	togglePet := func() {
 		if petWin == nil {
@@ -136,12 +145,7 @@ func main() {
 			bubbleWin.Hide()
 		}
 		petWin.Toggle()
-		visible := petWin.IsVisible()
-		prefs.PetVisible = visible
-		model.SetPetVisible(visible)
-		if win != nil && !win.IsDestroyed() {
-			win.Update(func() {})
-		}
+		syncPetVisible(petWin.IsVisible())
 	}
 	resetPet := func() {
 		if petWin == nil {
@@ -149,11 +153,7 @@ func main() {
 		}
 		bubbleWin.Hide()
 		petWin.ResetPosition()
-		prefs.PetVisible = true
-		model.SetPetVisible(true)
-		if win != nil && !win.IsDestroyed() {
-			win.Update(func() {})
-		}
+		syncPetVisible(true)
 	}
 
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { quitting = true })
@@ -210,9 +210,12 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		petWin = newPetWindow(petModel, func() bool { return quitting }, prefs.PetVisible)
-		bubbleWin = newBubbleWindow()
+		bubbleWin = newBubbleWindow(func() bool { return quitting })
 		petWin.SetOnMove(func() { bubbleWin.Hide() })
-		petWin.SetOnHide(func() { bubbleWin.Hide() })
+		petWin.SetOnHide(func() {
+			bubbleWin.Hide()
+			syncPetVisible(false)
+		})
 		petWin.SetOnDragStart(func() {
 			petModel.DragStarted()
 			bubbleWin.Hide()

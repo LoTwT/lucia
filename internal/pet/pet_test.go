@@ -337,13 +337,30 @@ func TestClickFaceStartsReaction(t *testing.T) {
 	}
 	tt := ui.NewTester(m.View, Size, Size)
 	tt.Frame()
-	tt.ClickAt(124, 60)
+	tt.ClickAt(128, 150)
 	tt.Frame()
 	if m.tapAt.IsZero() {
 		t.Fatal("clicking the face did not start the reaction")
 	}
 	if m.reaction != ReactionFace {
 		t.Fatalf("reaction = %v, want ReactionFace", m.reaction)
+	}
+}
+
+func TestClickHeadbandDoesNotStartReaction(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tt := ui.NewTester(m.View, Size, Size)
+	tt.Frame()
+	tt.ClickAt(124, 60)
+	tt.Frame()
+	if !m.tapAt.IsZero() {
+		t.Fatal("clicking the headband started a face reaction")
+	}
+	if m.reaction != ReactionNone {
+		t.Fatalf("reaction = %v, want ReactionNone", m.reaction)
 	}
 }
 

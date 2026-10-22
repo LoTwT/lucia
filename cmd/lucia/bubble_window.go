@@ -1,6 +1,7 @@
 package main
 
 import (
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -20,7 +21,7 @@ type bubbleWindow struct {
 	generation atomic.Int64
 }
 
-func newBubbleWindow() *bubbleWindow {
+func newBubbleWindow(quitting func() bool) *bubbleWindow {
 	b := &bubbleWindow{model: &pet.BubbleModel{}}
 	b.win = mygo.NewWindow(mygo.WindowOptions{
 		Title:             "Lucia 气泡",
@@ -41,10 +42,20 @@ func newBubbleWindow() *bubbleWindow {
 	})
 	b.win.SetIgnoreMouseEvents(true)
 	b.win.OnClose(func(e *mygo.CloseEvent) {
-		e.PreventDefault()
-		b.Hide()
+		b.handleClose(e, quitting)
 	})
 	return b
+}
+
+// handleClose keeps the bubble as a hide-on-close window during normal use,
+// but lets MyGo's quit sequence close it. Otherwise prepareQuit would cancel
+// the whole quit after the pet window had already been destroyed.
+func (b *bubbleWindow) handleClose(e *mygo.CloseEvent, quitting func() bool) {
+	if quitting != nil && quitting() {
+		return
+	}
+	e.PreventDefault()
+	b.Hide()
 }
 
 // Show selects the next line for reaction, places the bubble relative to the
@@ -53,11 +64,23 @@ func (b *bubbleWindow) Show(reaction pet.Reaction, petRect pet.Rect, displays []
 	if b == nil || b.win == nil || b.win.IsDestroyed() {
 		return
 	}
+	// MyGo v0.5.5 has no Linux implementation of SetIgnoreMouseEvents.
+	// Keep the bubble hidden there rather than letting it block clicks.
+	if runtime.GOOS == "linux" {
+		return
+	}
 	text := pet.BubbleLine(reaction, b.seq)
 	if text == "" {
 		return
 	}
 	b.seq++
+	// Invalidate the previous lifetime before showing the new line, so an
+	// old timer cannot hide the new bubble while it is being placed.
+	generation := b.generation.Add(1)
+	if b.hideTimer != nil {
+		b.hideTimer.Stop()
+		b.hideTimer = nil
+	}
 	placement := pet.PlaceBubble(petRect, displays)
 	b.model.SetContent(text, placement.Side, placement.TailX)
 	b.win.SetPosition(placement.X, placement.Y)
@@ -65,17 +88,15 @@ func (b *bubbleWindow) Show(reaction pet.Reaction, petRect pet.Rect, displays []
 	b.win.ShowInactive()
 	b.win.SetIgnoreMouseEvents(true)
 
-	generation := b.generation.Add(1)
-	if b.hideTimer != nil {
-		b.hideTimer.Stop()
-	}
 	b.hideTimer = time.AfterFunc(pet.BubbleLineDelay, func() {
-		if b.generation.Load() != generation {
-			return
-		}
-		if b.win != nil && !b.win.IsDestroyed() {
-			b.win.Hide()
-		}
+		mygo.RunOnMain(func() {
+			if b.generation.Load() != generation {
+				return
+			}
+			if b.win != nil && !b.win.IsDestroyed() {
+				b.win.Hide()
+			}
+		})
 	})
 }
 

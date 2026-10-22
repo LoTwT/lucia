@@ -122,6 +122,36 @@ func (m *Model) View(c *ui.Context) {
 // context menu uses it before bringing the console forward.
 func (m *Model) ShowOverview() { m.page = PageOverview }
 
+// RefreshOpenAtLogin makes the next view read the system login-item state
+// again, for a console opened after the user changed it outside Lucia.
+func (m *Model) RefreshOpenAtLogin() {
+	if m.cfg.OpenAtLogin != nil {
+		m.openAtLoginKnown = false
+	}
+}
+
+// setOpenAtLogin applies the requested state and falls back to the system's
+// actual state if the platform rejects it.
+func (m *Model) setOpenAtLogin(open bool) {
+	m.openAtLogin = open
+	if m.cfg.SetOpenAtLogin == nil {
+		return
+	}
+	if err := m.cfg.SetOpenAtLogin(open); err != nil {
+		m.settingsErr = fmt.Sprintf("设置开机自启失败：%v", err)
+		if m.cfg.OpenAtLogin != nil {
+			m.openAtLogin = m.cfg.OpenAtLogin()
+			m.openAtLoginKnown = true
+		}
+		return
+	}
+	m.settingsErr = ""
+	if m.cfg.OpenAtLogin != nil {
+		m.openAtLogin = m.cfg.OpenAtLogin()
+		m.openAtLoginKnown = true
+	}
+}
+
 // ShowUpdates switches to the updates page and starts a check when there is
 // no current result to show. The application menu calls it.
 func (m *Model) ShowUpdates() {
@@ -286,11 +316,7 @@ func (m *Model) petCard(c *ui.Context) {
 					ui.Text(c, "登录系统后自动启动 Lucia 和桌宠。").FontSize(12).TextColor(t.TextMuted)
 				})
 				ui.Switch(c, &m.openAtLogin).Label("开机自启").OnChange(func() {
-					if err := m.cfg.SetOpenAtLogin(m.openAtLogin); err != nil {
-						m.settingsErr = fmt.Sprintf("设置开机自启失败：%v", err)
-					} else {
-						m.settingsErr = ""
-					}
+					m.setOpenAtLogin(m.openAtLogin)
 				})
 			})
 		}

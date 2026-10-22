@@ -53,6 +53,41 @@ func TestBubbleTailRendersOnChosenSide(t *testing.T) {
 	}
 }
 
+func TestBubbleTailClampsInsideCard(t *testing.T) {
+	tests := []struct {
+		name   string
+		pet    Rect
+		bubble Rect
+		want   int
+	}{
+		{
+			name:   "left edge",
+			pet:    Rect{X: 0, Width: 248},
+			bubble: Rect{X: 100, Width: BubbleWidth},
+			want:   33,
+		},
+		{
+			name:   "center",
+			pet:    Rect{X: 400, Width: 248},
+			bubble: Rect{X: 404, Width: BubbleWidth},
+			want:   120,
+		},
+		{
+			name:   "right edge",
+			pet:    Rect{X: 1412, Width: 248},
+			bubble: Rect{X: 1172, Width: BubbleWidth},
+			want:   207,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bubbleTailX(tt.pet, tt.bubble); got != tt.want {
+				t.Fatalf("bubbleTailX = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPlaceBubble(t *testing.T) {
 	displays := []Display{{
 		Bounds:   Rect{X: 0, Y: 0, Width: 1512, Height: 982},

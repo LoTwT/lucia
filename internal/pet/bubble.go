@@ -88,7 +88,9 @@ func drawBubbleTail(p *ui.Painter, r ui.Rect, side BubbleSide, tailX int, top, b
 	if x <= 0 {
 		x = r.W / 2
 	}
-	x = min(max(x, bubbleCardRadius+bubbleTailHalf), r.W-bubbleCardRadius-bubbleTailHalf)
+	minX := float32(bubbleInset + bubbleCardRadius + bubbleTailHalf)
+	maxX := r.W - minX
+	x = min(max(x, minX), maxX)
 
 	var baseY, tipY float32
 	if side == BubbleBelow {
@@ -144,7 +146,9 @@ func PlaceBubble(petRect Rect, displays []Display) BubblePlacement {
 
 func bubbleTailX(petRect, bubble Rect) int {
 	tail := petRect.X + petRect.Width/2 - bubble.X
-	return min(max(tail, bubbleCardRadius+bubbleTailHalf), BubbleWidth-bubbleCardRadius-bubbleTailHalf)
+	minTail := bubbleInset + bubbleCardRadius + bubbleTailHalf
+	maxTail := BubbleWidth - minTail
+	return min(max(tail, minTail), maxTail)
 }
 
 func matchingDisplay(win Rect, displays []Display) Display {
