@@ -34,6 +34,7 @@
 | `idle-half-closed.png` | `expressions/v1_half_closed_eyes.png` | `833b1347f4cf1742ca8eb02591d15eebbf3c4cc9` |
 | `idle-closed.png` | `expressions/v1_close_eyes.png` | `ee3a90d8519b8fffd406e2b838bca3fa3e212d0e` |
 | `tray.png` | 由 `idle-open.png` 缩放到 32×32 的派生图 | — |
+| `layout.json` | 本项目为这套素材维护的画布、窗口/立绘尺寸与归一化脸部区域 | — |
 
 三张 idle 图均为 800×800 RGBA，透明底，内容为头肩半身像（不含下半身）；文件仅重命名，像素未修改。`tray.png` 是从 `idle-open.png` 缩放到 32×32 的派生图。
 

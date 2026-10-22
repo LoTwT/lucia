@@ -33,6 +33,54 @@ func TestFrameAtFollowsBlink(t *testing.T) {
 	}
 }
 
+func TestDefaultLayout(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Size(); got != 248 {
+		t.Fatalf("default window size = %d, want 248", got)
+	}
+	if got := m.SpriteSize(); got != 240 {
+		t.Fatalf("default sprite size = %d, want 240", got)
+	}
+	face := m.FaceRegion()
+	want := ui.Rect{X: 78, Y: 112, W: 100, H: 76}
+	if face != want {
+		t.Fatalf("default face = %+v, want %+v", face, want)
+	}
+}
+
+func TestScaleLayout(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.SetScale(1.25)
+	if got := m.Size(); got != 310 {
+		t.Fatalf("scaled window size = %d, want 310", got)
+	}
+	if got := m.SpriteSize(); got != 300 {
+		t.Fatalf("scaled sprite size = %d, want 300", got)
+	}
+	face := m.FaceRegion()
+	if math.Abs(float64(face.X-97.5)) > 0.01 ||
+		math.Abs(float64(face.Y-140)) > 0.01 ||
+		math.Abs(float64(face.W-125)) > 0.01 ||
+		math.Abs(float64(face.H-95)) > 0.01 {
+		t.Fatalf("scaled face = %+v, want approximately (97.5,140) 125x95", face)
+	}
+
+	m.SetScale(0.1)
+	if got := m.Scale(); got != minScale {
+		t.Fatalf("minimum scale = %v, want %v", got, minScale)
+	}
+	m.SetScale(9)
+	if got := m.Scale(); got != maxScale {
+		t.Fatalf("maximum scale = %v, want %v", got, maxScale)
+	}
+}
+
 func TestNewDecodesEmbeddedFrames(t *testing.T) {
 	m, err := New()
 	if err != nil {
@@ -53,7 +101,7 @@ func TestViewRendersTransparentPet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, Size, Size)
+	tt := ui.NewTester(m.View, m.Size(), m.Size())
 	tt.Frame()
 
 	rect, ok := tt.Find("Lucia 桌宠")
@@ -283,7 +331,7 @@ func TestInteractionWakesForNextFrame(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, Size, Size)
+	tt := ui.NewTester(m.View, m.Size(), m.Size())
 	tt.Frame()
 	tt.Advance(asleepAfter)
 	tt.Frame()
@@ -335,7 +383,7 @@ func TestClickFaceStartsReaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, Size, Size)
+	tt := ui.NewTester(m.View, m.Size(), m.Size())
 	tt.Frame()
 	tt.ClickAt(128, 150)
 	tt.Frame()
@@ -347,12 +395,28 @@ func TestClickFaceStartsReaction(t *testing.T) {
 	}
 }
 
+func TestClickFaceScalesWithLayout(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.SetScale(1.5)
+	tt := ui.NewTester(m.View, m.Size(), m.Size())
+	tt.Frame()
+	face := m.FaceRegion()
+	tt.ClickAt(face.X+face.W/2, face.Y+face.H/2)
+	tt.Frame()
+	if m.reaction != ReactionFace {
+		t.Fatalf("reaction = %v, want ReactionFace at scaled face", m.reaction)
+	}
+}
+
 func TestClickHeadbandDoesNotStartReaction(t *testing.T) {
 	m, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, Size, Size)
+	tt := ui.NewTester(m.View, m.Size(), m.Size())
 	tt.Frame()
 	tt.ClickAt(124, 60)
 	tt.Frame()
@@ -369,7 +433,7 @@ func TestClickBodyKeepsDragArea(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, Size, Size)
+	tt := ui.NewTester(m.View, m.Size(), m.Size())
 	tt.Frame()
 	tt.ClickAt(124, 200)
 	tt.Frame()
@@ -386,7 +450,7 @@ func TestContextMenuStartsReaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, Size, Size)
+	tt := ui.NewTester(m.View, m.Size(), m.Size())
 	tt.Frame()
 	tt.RightClickAt(124, 200)
 	found := false
@@ -422,7 +486,7 @@ func TestContextMenuApplicationActions(t *testing.T) {
 		Hide:         func() { calls = append(calls, "hide") },
 		Reset:        func() { calls = append(calls, "reset") },
 	})
-	tt := ui.NewTester(m.View, Size, Size)
+	tt := ui.NewTester(m.View, m.Size(), m.Size())
 	tt.Frame()
 
 	tt.RightClickAt(124, 200)
