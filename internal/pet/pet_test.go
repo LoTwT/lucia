@@ -81,6 +81,21 @@ func TestScaleLayout(t *testing.T) {
 	}
 }
 
+func TestSetScaleRejectsInvalidValues(t *testing.T) {
+	for _, scale := range []float64{
+		0, -1, math.NaN(), math.Inf(1), math.Inf(-1),
+	} {
+		m, err := New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.SetScale(scale)
+		if got := m.Scale(); got != defaultScale {
+			t.Errorf("SetScale(%v) = %v, want %v", scale, got, defaultScale)
+		}
+	}
+}
+
 func TestNewDecodesEmbeddedFrames(t *testing.T) {
 	m, err := New()
 	if err != nil {
