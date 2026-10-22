@@ -24,6 +24,9 @@ func TestLoadMissingUsesDefaults(t *testing.T) {
 	if got.BubbleCooldownSeconds != 0 {
 		t.Errorf("bubble cooldown = %d, want 0", got.BubbleCooldownSeconds)
 	}
+	if got.PetScale != 1 {
+		t.Errorf("pet scale = %v, want 1", got.PetScale)
+	}
 }
 
 func TestLoadMergesNewFieldsWithDefaults(t *testing.T) {
@@ -44,6 +47,23 @@ func TestLoadMergesNewFieldsWithDefaults(t *testing.T) {
 	if got.SoundEnabled || got.BubbleCooldownSeconds != 0 {
 		t.Errorf("missing bubble fields = sound %v, cooldown %d; want false, 0", got.SoundEnabled, got.BubbleCooldownSeconds)
 	}
+	if got.PetScale != 1 {
+		t.Errorf("a missing petScale field must keep the default 1, got %v", got.PetScale)
+	}
+}
+
+func TestLoadNormalizesZeroPetScale(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, File), []byte(`{"petScale":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.PetScale != 1 {
+		t.Fatalf("pet scale = %v, want 1", got.PetScale)
+	}
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
@@ -53,6 +73,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	want.PetVisible = false
 	want.SoundEnabled = true
 	want.BubbleCooldownSeconds = 30
+	want.PetScale = 1.25
 	if err := Save(dir, want); err != nil {
 		t.Fatalf("Save: %v", err)
 	}

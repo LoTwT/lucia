@@ -85,6 +85,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("lucia: pet assets: %v", err)
 	}
+	petModel.SetScale(prefs.PetScale)
+	prefs.PetScale = petModel.Scale()
 
 	var (
 		win        *mygo.Window
@@ -110,8 +112,12 @@ func main() {
 			return nil
 		},
 		ApplyPetVisible: func(visible bool) { petWin.SetVisible(visible) },
-		OpenAtLogin:     func() bool { return mygo.App.OpenAtLogin() },
-		SetOpenAtLogin:  func(open bool) error { return mygo.App.SetOpenAtLogin(open) },
+		ApplyPetScale: func(scale float64) {
+			bubbleWin.Hide()
+			petWin.ApplyScale(scale)
+		},
+		OpenAtLogin:    func() bool { return mygo.App.OpenAtLogin() },
+		SetOpenAtLogin: func(open bool) error { return mygo.App.SetOpenAtLogin(open) },
 		ResetPetPosition: func() {
 			bubbleWin.Hide()
 			petWin.ResetPosition()

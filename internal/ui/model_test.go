@@ -67,9 +67,29 @@ func TestOverviewShowsPetControls(t *testing.T) {
 		ResetPetPosition: func() {},
 	})
 	tt := ui.NewTester(model.View, 1000, 700)
-	for _, want := range []string{"桌宠", "显示桌宠", "互动音效", "气泡频率", "开机自启", "重置桌宠位置"} {
+	for _, want := range []string{"桌宠", "显示桌宠", "桌宠大小", "互动音效", "气泡频率", "开机自启", "重置桌宠位置"} {
 		if !tt.HasText(want) {
 			t.Errorf("overview does not show %q; texts: %v", want, tt.Texts())
+		}
+	}
+}
+
+func TestPetScaleChoiceMapping(t *testing.T) {
+	tests := []struct {
+		scale  float64
+		choice string
+	}{
+		{scale: 0.8, choice: "小（0.8×）"},
+		{scale: 1.0, choice: "标准（1.0×）"},
+		{scale: 1.25, choice: "大（1.25×）"},
+		{scale: 1.5, choice: "特大（1.5×）"},
+	}
+	for _, tt := range tests {
+		if got := petScaleChoiceFor(tt.scale); got != tt.choice {
+			t.Errorf("petScaleChoiceFor(%v) = %q, want %q", tt.scale, got, tt.choice)
+		}
+		if got := petScaleForChoice(tt.choice); got != tt.scale {
+			t.Errorf("petScaleForChoice(%q) = %v, want %v", tt.choice, got, tt.scale)
 		}
 	}
 }

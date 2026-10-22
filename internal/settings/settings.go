@@ -29,6 +29,9 @@ type Settings struct {
 	// BubbleCooldownSeconds limits how often a speech bubble appears:
 	// 0 every interaction, a positive number the minimum gap, -1 off.
 	BubbleCooldownSeconds int `json:"bubbleCooldownSeconds"`
+	// PetScale scales the pet window and sprite together. Invalid values are
+	// clamped by the pet model; the default is 1.0.
+	PetScale float64 `json:"petScale"`
 }
 
 // Default returns the preferences of a first launch.
@@ -36,6 +39,7 @@ func Default() Settings {
 	return Settings{
 		CheckUpdatesOnLaunch: true,
 		PetVisible:           true,
+		PetScale:             1.0,
 	}
 }
 
@@ -56,6 +60,9 @@ func Load(dir string) (Settings, error) {
 	s := Default()
 	if err := json.Unmarshal(data, &s); err != nil {
 		return Default(), fmt.Errorf("parse %q: %w", path, err)
+	}
+	if s.PetScale <= 0 {
+		s.PetScale = 1.0
 	}
 	return s, nil
 }
