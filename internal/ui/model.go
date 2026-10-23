@@ -40,6 +40,9 @@ type Config struct {
 	// ApplyPetVisible shows or hides the desktop pet after the preference
 	// changes. Nil hides the control in tests or embedded hosts.
 	ApplyPetVisible func(bool)
+	// ApplyPetScale resizes the desktop pet after the preference changes.
+	// Nil keeps the preference only in tests or embedded hosts.
+	ApplyPetScale func(float64)
 	// OpenAtLogin reports the login item state. Nil hides the control.
 	OpenAtLogin func() bool
 	// SetOpenAtLogin changes the login item. Nil hides the control.
@@ -71,15 +74,18 @@ type Model struct {
 	openAtLoginKnown bool
 	// bubbleChoice is the label selected in the bubble frequency control.
 	bubbleChoice string
+	// petScaleChoice is the label selected in the pet size control.
+	petScaleChoice string
 }
 
 // New creates the window model on the overview page.
 func New(cfg Config) *Model {
 	return &Model{
-		cfg:          cfg,
-		page:         PageOverview,
-		settings:     cfg.Settings,
-		bubbleChoice: bubbleChoiceFor(cfg.Settings.BubbleCooldownSeconds),
+		cfg:            cfg,
+		page:           PageOverview,
+		settings:       cfg.Settings,
+		bubbleChoice:   bubbleChoiceFor(cfg.Settings.BubbleCooldownSeconds),
+		petScaleChoice: petScaleChoiceFor(cfg.Settings.PetScale),
 	}
 }
 
@@ -229,6 +235,34 @@ func (m *Model) overviewPage(c *ui.Context) {
 	})
 }
 
+var petScaleChoices = []string{"小（0.8×）", "标准（1.0×）", "大（1.25×）", "特大（1.5×）"}
+
+func petScaleChoiceFor(scale float64) string {
+	switch {
+	case scale <= 0.9:
+		return petScaleChoices[0]
+	case scale <= 1.1:
+		return petScaleChoices[1]
+	case scale <= 1.35:
+		return petScaleChoices[2]
+	default:
+		return petScaleChoices[3]
+	}
+}
+
+func petScaleForChoice(choice string) float64 {
+	switch choice {
+	case "小（0.8×）":
+		return 0.8
+	case "大（1.25×）":
+		return 1.25
+	case "特大（1.5×）":
+		return 1.5
+	default:
+		return 1.0
+	}
+}
+
 var bubbleChoices = []string{"每次互动", "最多每 30 秒", "最多每 2 分钟", "关闭"}
 
 func bubbleChoiceFor(seconds int) string {
@@ -282,6 +316,21 @@ func (m *Model) petCard(c *ui.Context) {
 					m.cfg.ApplyPetVisible(m.settings.PetVisible)
 				}
 			})
+		})
+
+		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+			ui.Column(c).Gap(2).Grow(1).Children(func() {
+				ui.Text(c, "桌宠大小").FontSize(14)
+				ui.Text(c, "同时缩放窗口、立绘和脸部互动区域。").FontSize(12).
+					TextColor(t.TextMuted)
+			})
+			if ui.Select(c, &m.petScaleChoice, petScaleChoices).Label("桌宠大小").Width(170).Changed() {
+				m.settings.PetScale = petScaleForChoice(m.petScaleChoice)
+				m.saveSettings()
+				if m.cfg.ApplyPetScale != nil {
+					m.cfg.ApplyPetScale(m.settings.PetScale)
+				}
+			}
 		})
 
 		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {

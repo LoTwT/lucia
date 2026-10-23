@@ -14,6 +14,8 @@ import (
 // leaves room for the bubble window without turning main into a window module.
 type petWindow struct {
 	win          *mygo.Window
+	model        *pet.Model
+	size         atomic.Int32
 	onMove       func()
 	onHide       func()
 	onDragStart  func()
@@ -21,15 +23,27 @@ type petWindow struct {
 	dragWatching atomic.Bool
 }
 
+// windowSize reads the current edge length from the atomic field: drag
+// clamping runs on a background goroutine while the settings UI can resize
+// the window on the main thread.
+func (p *petWindow) windowSize() int {
+	if p == nil {
+		return 0
+	}
+	return int(p.size.Load())
+}
+
 func newPetWindow(model *pet.Model, quitting func() bool, visible bool) *petWindow {
 	area := mygo.Screen.PrimaryDisplay().WorkArea
-	p := &petWindow{}
+	p := &petWindow{model: model}
+	p.size.Store(int32(model.Size()))
+	size := p.windowSize()
 	p.win = mygo.NewWindow(mygo.WindowOptions{
 		Title:             "Lucia 桌宠",
-		Width:             pet.Size,
-		Height:            pet.Size,
-		X:                 area.X + area.Width - pet.Size - 24,
-		Y:                 area.Y + area.Height - pet.Size - 24,
+		Width:             size,
+		Height:            size,
+		X:                 area.X + area.Width - size - 24,
+		Y:                 area.Y + area.Height - size - 24,
 		Frameless:         true,
 		Transparent:       true,
 		AlwaysOnTop:       true,
@@ -79,8 +93,9 @@ func newPetWindow(model *pet.Model, quitting func() bool, visible bool) *petWind
 			}
 		}
 		x, y := p.win.Position()
+		size := p.windowSize()
 		if _, changed := pet.KeepOnScreen(pet.Rect{
-			X: x, Y: y, Width: pet.Size, Height: pet.Size,
+			X: x, Y: y, Width: size, Height: size,
 		}, currentPetDisplays()); !changed {
 			return
 		}
@@ -156,9 +171,10 @@ func (p *petWindow) ResetPosition() {
 		return
 	}
 	area := mygo.Screen.PrimaryDisplay().WorkArea
+	size := p.windowSize()
 	p.win.SetPosition(
-		area.X+area.Width-pet.Size-24,
-		area.Y+area.Height-pet.Size-24,
+		area.X+area.Width-size-24,
+		area.Y+area.Height-size-24,
 	)
 	p.win.ShowInactive()
 }
@@ -191,11 +207,39 @@ func (p *petWindow) watchDrag() {
 }
 
 func (p *petWindow) Rect() pet.Rect {
-	if p == nil || p.win == nil || p.win.IsDestroyed() {
-		return pet.Rect{Width: pet.Size, Height: pet.Size}
+	if p == nil {
+		return pet.Rect{}
+	}
+	if p.win == nil || p.win.IsDestroyed() {
+		size := p.windowSize()
+		return pet.Rect{Width: size, Height: size}
 	}
 	x, y := p.win.Position()
-	return pet.Rect{X: x, Y: y, Width: pet.Size, Height: pet.Size}
+	size := p.windowSize()
+	return pet.Rect{X: x, Y: y, Width: size, Height: size}
+}
+
+// ApplyScale resizes the native window and keeps its old center, then clamps
+// the result to the available display area. The model owns the layout math so
+// the face target and sprite stay in step with the window.
+func (p *petWindow) ApplyScale(scale float64) {
+	if p == nil || p.win == nil || p.win.IsDestroyed() || p.model == nil {
+		return
+	}
+	old := p.Rect()
+	p.model.SetScale(scale)
+	size := p.model.Size()
+	if size == p.windowSize() {
+		return
+	}
+	p.size.Store(int32(size))
+	p.win.SetSize(size, size)
+	p.win.SetPosition(
+		old.X+(old.Width-size)/2,
+		old.Y+(old.Height-size)/2,
+	)
+	p.clampOutside()
+	p.win.Update(func() {})
 }
 
 func (p *petWindow) clampOutside() {
@@ -203,8 +247,9 @@ func (p *petWindow) clampOutside() {
 		return
 	}
 	x, y := p.win.Position()
+	size := p.windowSize()
 	next, changed := pet.KeepOnScreen(pet.Rect{
-		X: x, Y: y, Width: pet.Size, Height: pet.Size,
+		X: x, Y: y, Width: size, Height: size,
 	}, currentPetDisplays())
 	if changed {
 		p.win.SetPosition(next.X, next.Y)
@@ -220,8 +265,9 @@ func (p *petWindow) recover() {
 	if p.win.IsMaximized() {
 		p.win.Unmaximize()
 	}
-	if w, h := p.win.Size(); w != pet.Size || h != pet.Size {
-		p.win.SetSize(pet.Size, pet.Size)
+	size := p.windowSize()
+	if w, h := p.win.Size(); w != size || h != size {
+		p.win.SetSize(size, size)
 	}
 	p.clampOutside()
 }

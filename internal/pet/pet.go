@@ -12,12 +12,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// Size is the pet window's edge length in DIPs. The sprite is slightly
-// smaller so the idle bob never clips the character at the window edge.
-const Size = 248
-
-const spriteSize = 240
-
 // The three frames share one 800x800 canvas, so switching among them never
 // moves the character.
 var (
@@ -61,12 +55,6 @@ const (
 	minFrameInterval    = time.Millisecond
 )
 
-// The face region receives clicks; the rest of the window stays a
-// DragWindow handle so the pet can still be moved. The current artwork is a
-// head-and-shoulders bust, so the clickable face sits in the middle of the
-// window rather than near the top edge.
-var faceRegion = ui.Rect{X: 78, Y: 112, W: 100, H: 76}
-
 type frame uint8
 
 const (
@@ -101,6 +89,11 @@ func activityAt(idle time.Duration) Activity {
 // background goroutine to stop.
 type Model struct {
 	frames          [3]*ui.Bitmap
+	layout          assetLayout
+	scale           float64
+	windowSize      int
+	spriteSize      int
+	faceRegion      ui.Rect
 	start           time.Time
 	lastInteraction time.Time
 	interacted      bool
@@ -125,7 +118,11 @@ type MenuActions struct {
 // New decodes the embedded frames. Failing here means the build's embedded
 // assets are broken, so the caller should report it and stop.
 func New() (*Model, error) {
-	m := &Model{}
+	layout, err := loadLayout()
+	if err != nil {
+		return nil, fmt.Errorf("load pet layout: %w", err)
+	}
+	m := &Model{layout: layout, scale: defaultScale}
 	for i, data := range [][]byte{idleOpenPNG, idleHalfClosedPNG, idleClosedPNG} {
 		bitmap, err := ui.DecodeBitmap(data)
 		if err != nil {
@@ -133,6 +130,7 @@ func New() (*Model, error) {
 		}
 		m.frames[i] = bitmap
 	}
+	m.applyLayout()
 	return m, nil
 }
 
@@ -253,7 +251,7 @@ func (m *Model) View(c *ui.Context) {
 	outer.Children(func() {
 		ui.Row(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 			image := ui.Image(c, m.frames[displayFrame(activity, elapsed, m.reaction, reactionElapsed, reduceMotion)]).
-				Size(spriteSize, spriteSize).
+				Size(float32(m.spriteSize), float32(m.spriteSize)).
 				Fit(ui.Contain).
 				Label("Lucia 桌宠").
 				TransformOrigin(0.5, 1)
@@ -264,8 +262,8 @@ func (m *Model) View(c *ui.Context) {
 			image.Translate(0, bob+lift)
 		})
 		ui.Box(c).Absolute().
-			Left(faceRegion.X).Top(faceRegion.Y).
-			Size(faceRegion.W, faceRegion.H).
+			Left(m.faceRegion.X).Top(m.faceRegion.Y).
+			Size(m.faceRegion.W, m.faceRegion.H).
 			Label("摸摸脸").
 			Cursor(ui.CursorPointer).
 			OnClick(func() { m.React(ReactionFace) })
