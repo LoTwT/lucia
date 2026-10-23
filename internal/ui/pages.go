@@ -70,23 +70,23 @@ func (m *Model) updateStatusPanel(c *ui.Context) {
 					}
 				}
 			})
-		}
-		ui.Box(c).Height(1).WidthPercent(100).Background(t.Border)
-		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "启动时自动检查更新").FontSize(14)
-				ui.Text(c, "启动时检查一次，运行期间每 24 小时再检查一次；关闭后仍可手动检查。").FontSize(12).
-					TextColor(t.TextMuted)
-			})
-			ui.Switch(c, &m.settings.CheckUpdatesOnLaunch).Label("启动时自动检查更新").
-				OnChange(func() {
-					m.saveSettings()
-					m.cfg.Updates.SetAutoCheck(m.settings.CheckUpdatesOnLaunch)
-					if m.settings.CheckUpdatesOnLaunch {
-						m.cfg.Updates.CheckAsync()
-					}
+			ui.Box(c).Height(1).WidthPercent(100).Background(t.Border)
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "启动时自动检查更新").FontSize(14)
+					ui.Text(c, "启动时检查一次，运行期间每 24 小时再检查一次；关闭后仍可手动检查。").FontSize(12).
+						TextColor(t.TextMuted)
 				})
-		})
+				ui.Switch(c, &m.settings.CheckUpdatesOnLaunch).Label("启动时自动检查更新").
+					OnChange(func() {
+						m.saveSettings()
+						m.cfg.Updates.SetAutoCheck(m.settings.CheckUpdatesOnLaunch)
+						if m.settings.CheckUpdatesOnLaunch {
+							m.cfg.Updates.CheckAsync()
+						}
+					})
+			})
+		}
 	})
 }
 

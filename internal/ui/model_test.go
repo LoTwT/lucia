@@ -302,6 +302,29 @@ func TestDisabledBuildExplainsUpdates(t *testing.T) {
 	if tt.HasText("LoTwT/lucia") {
 		t.Errorf("disabled build still shows the update source; texts: %v", tt.Texts())
 	}
+	if tt.HasText("启动时自动检查更新") {
+		t.Errorf("disabled build still shows the auto-check control; texts: %v", tt.Texts())
+	}
+}
+
+func TestManualCheckAvailableWhenAutoCheckDisabled(t *testing.T) {
+	prefs := settings.Default()
+	prefs.CheckUpdatesOnLaunch = false
+	model := New(Config{
+		Version:  "0.0.1",
+		DataDir:  "/tmp/lucia",
+		Updates:  updates.New(fakeSource{}, "0.0.1"),
+		Settings: prefs,
+	})
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("关于"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"检查更新", "启动时自动检查更新"} {
+		if !tt.HasText(want) {
+			t.Errorf("about page does not show %q with auto-check disabled; texts: %v", want, tt.Texts())
+		}
+	}
 }
 
 type disabledSource struct{}
