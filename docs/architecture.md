@@ -15,7 +15,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 | `internal/settings` | `settings.json` 的默认值、容错读取与原子写入。 |
 | `internal/updates` | 更新状态机；`MyGo` 适配器把 `mygo.Updater` 接到 `Source` 接口。 |
 | `internal/pet` | 桌宠立绘、idle 动画、点击反应、气泡模型与位置规则；素材用 `go:embed` 进入二进制。 |
-| `internal/ui` | 主窗口模型、侧栏与三个页面（桌宠、更新、关于），以及 `ui.NewTester` 视图测试。 |
+| `internal/ui` | 主窗口模型、侧栏与两个页面（桌宠、关于），以及 `ui.NewTester` 视图测试。 |
 | `resources/` | 应用图标与需要随包分发的资源；MyGo 在打包时合并到应用资源根。 |
 
 依赖方向：`cmd` → `internal/*`；`internal/ui` 只依赖 `internal/settings` 与 `internal/updates`；`internal/pet` 只依赖 MyGo 的 `ui` 包与标准库；`internal/updates` 是唯一直接调用 `mygo.Updater` 的包。这样更新逻辑和桌宠动画都可以脱离窗口与真实网络做单元测试。

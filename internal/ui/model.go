@@ -16,7 +16,6 @@ import (
 // Pages of the main window, also used as sidebar item IDs.
 const (
 	PageOverview = "overview"
-	PageUpdates  = "updates"
 	PageAbout    = "about"
 )
 
@@ -24,10 +23,6 @@ const (
 type Config struct {
 	// Version is the running application version.
 	Version string
-	// Commit is the short source revision, or "unknown".
-	Commit string
-	// Platform is GOOS/GOARCH of the running binary.
-	Platform string
 	// DataDir is the application's data root, shown in the window.
 	DataDir string
 	// Updates is the update manager the window drives. Required.
@@ -105,8 +100,6 @@ func (m *Model) View(c *ui.Context) {
 			ui.Scroll(c).Grow(1).Padding(24, 32, 32).Gap(18).Children(func() {
 				ui.Column(c).MaxWidth(820).Gap(18).Children(func() {
 					switch m.page {
-					case PageUpdates:
-						m.updatesPage(c)
 					case PageAbout:
 						m.aboutPage(c)
 					default:
@@ -158,10 +151,11 @@ func (m *Model) setOpenAtLogin(open bool) {
 	}
 }
 
-// ShowUpdates switches to the updates page and starts a check when there is
-// no current result to show. The application menu calls it.
+// ShowUpdates opens the about page, where the update controls live, and
+// starts a check when there is no current result to show. The application
+// menu calls it.
 func (m *Model) ShowUpdates() {
-	m.page = PageUpdates
+	m.page = PageAbout
 	switch m.cfg.Updates.Snapshot().Phase {
 	case updates.PhaseIdle, updates.PhaseUpToDate, updates.PhaseFailed:
 		m.cfg.Updates.CheckAsync()
@@ -176,12 +170,11 @@ func (m *Model) sidebar(c *ui.Context) {
 		ui.Sidebar(c, &m.page, func() {
 			ui.SidebarSection(c, "应用", nil, func() {
 				ui.SidebarItem(c, PageOverview, overviewIcon, "桌宠")
-				ui.SidebarItem(c, PageUpdates, updatesIcon, "更新").Children(func() {
+				ui.SidebarItem(c, PageAbout, aboutIcon, "关于").Children(func() {
 					if phase := m.cfg.Updates.Snapshot().Phase; phase == updates.PhaseAvailable {
 						ui.Badge(c, "新")
 					}
 				})
-				ui.SidebarItem(c, PageAbout, aboutIcon, "关于")
 			})
 		}).Grow(1).Label("页面")
 		ui.Textf(c, "v%s", m.cfg.Version).FontSize(11).TextColor(t.TextMuted).Padding(10, 16)
@@ -217,10 +210,8 @@ func (m *Model) logoMark(c *ui.Context, size float32) {
 
 func (m *Model) pageHeading() (title, subtitle string) {
 	switch m.page {
-	case PageUpdates:
-		return "更新", "检查签名更新，安装后自动重启进入新版本"
 	case PageAbout:
-		return "关于", "构建信息、数据位置与项目入口"
+		return "关于", "版本、更新与数据位置"
 	default:
 		return "桌宠", "设置桌宠的显示方式、声音与互动行为"
 	}
@@ -372,13 +363,6 @@ func (m *Model) petCard(c *ui.Context) {
 				m.cfg.ResetPetPosition()
 			}
 		}
-	})
-}
-
-func (m *Model) infoRow(c *ui.Context, label, value string) {
-	ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-		ui.Text(c, label).FontSize(12).TextColor(c.Theme().TextMuted).Width(52)
-		ui.Text(c, value).FontSize(12).Grow(1).Selectable()
 	})
 }
 

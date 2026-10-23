@@ -68,7 +68,7 @@ lucia: self-test: version=0.0.1 commit=0123456789ab platform=darwin/arm64 update
 - `internal/settings`：默认值合并、旧文件新增字段迁移、原子写入往返、损坏文件回退。
 - `internal/updates`：禁用构建不联网、检查结果、失败可见、并发拒绝、安装进度、安装失败保留重试、自动检查启动。
 - `internal/pet`：内嵌立绘解码、眨眼帧选择、点击反应曲线、脸部点击区、身体拖动区、右键菜单、气泡台词与定位、透明根节点、可见像素、动画请求、托盘图标尺寸，以及窗口位置约束。
-- `internal/ui`：桌宠设置、侧栏页面切换、关于页构建信息、可用更新显示说明与安装按钮、禁用构建的解释。
+- `internal/ui`：桌宠设置、侧栏页面切换、关于页版本/更新/数据信息、可用更新显示说明与安装按钮、禁用构建的解释。
 
 视图测试不打开窗口，但会执行真实布局与点击；`ui.NewTester` 对重复 key 与生命周期错误是严格的。位置约束和气泡定位是纯几何测试；桌宠的透明、置顶、拖动、跨屏、气泡穿透与托盘必须另做真机验收，测试器不能代替窗口行为。
 
@@ -86,7 +86,7 @@ lucia: self-test: version=0.0.1 commit=0123456789ab platform=darwin/arm64 update
 
 ## 更新在开发期的行为
 
-- `go run`、`go test` 与 `go tool mygo dev` 的产物不嵌入更新源，更新页显示“当前构建未启用自动更新”，`LUCIA_SELFTEST` 报告 `updates=disabled`。
+- `go run`、`go test` 与 `go tool mygo dev` 的产物不嵌入更新源，关于页显示“当前构建未启用自动更新”，`LUCIA_SELFTEST` 报告 `updates=disabled`。
 - 本地 `go tool mygo build` 会嵌入 `mygo.json` 的更新源；若设置了 `MYGO_UPDATER_PRIVATE_KEY`，同时产出签名更新档案，否则只警告并跳过更新档案。产物仍会检查正式渠道。
 - 真实“发现新版本 → 下载 → 签名校验 → 替换 → 自动重启”需要至少两个已发布版本，验证步骤见 [release.md](release.md#发布后验证)。不要用正式 `v*` 标签做升级演练；使用 `test-v*` 测试渠道，具体操作见 [testing-updates.md](testing-updates.md)。
 

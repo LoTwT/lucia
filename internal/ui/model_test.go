@@ -31,8 +31,6 @@ func newTestModel(t *testing.T, src updates.Source) (*Model, *updates.Manager) {
 	saved := 0
 	model := New(Config{
 		Version:       "0.0.1",
-		Commit:        "0123456789ab",
-		Platform:      "darwin/arm64",
 		DataDir:       "/Users/ada/Library/Application Support/Lucia",
 		Updates:       manager,
 		Settings:      settings.Default(),
@@ -44,15 +42,20 @@ func newTestModel(t *testing.T, src updates.Source) (*Model, *updates.Manager) {
 	return model, manager
 }
 
-func TestAboutShowsBuildIdentity(t *testing.T) {
+func TestAboutShowsVersionWithoutBuildDetails(t *testing.T) {
 	model, _ := newTestModel(t, fakeSource{})
 	tt := ui.NewTester(model.View, 1000, 700)
 	if err := tt.Click("关于"); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Lucia", "v0.0.1", "构建", "0123456789ab", "darwin/arm64", "com.lotwt.lucia"} {
+	for _, want := range []string{"Lucia", "v0.0.1", "版本、更新与数据位置", "检查更新"} {
 		if !tt.HasText(want) {
 			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
+		}
+	}
+	for _, unwanted := range []string{"0123456789ab", "darwin/arm64", "com.lotwt.lucia"} {
+		if tt.HasText(unwanted) {
+			t.Errorf("about page still shows build detail %q; texts: %v", unwanted, tt.Texts())
 		}
 	}
 }
@@ -60,8 +63,6 @@ func TestAboutShowsBuildIdentity(t *testing.T) {
 func TestOverviewShowsPetControls(t *testing.T) {
 	model := New(Config{
 		Version:          "0.0.1",
-		Commit:           "0123456789ab",
-		Platform:         "darwin/arm64",
 		DataDir:          "/tmp/lucia",
 		Updates:          updates.New(disabledSource{}, "0.0.1"),
 		Settings:         settings.Default(),
@@ -170,31 +171,36 @@ func TestRefreshOpenAtLogin(t *testing.T) {
 	}
 }
 
-func TestSidebarNavigatesToUpdatesAndAbout(t *testing.T) {
+func TestSidebarNavigatesBetweenPetAndAbout(t *testing.T) {
 	model, _ := newTestModel(t, fakeSource{})
 	tt := ui.NewTester(model.View, 1000, 700)
-	if err := tt.Click("更新"); err != nil {
-		t.Fatal(err)
-	}
-	if model.page != PageUpdates {
-		t.Fatalf("page %q, want updates", model.page)
-	}
-	if !tt.HasText("检查更新") || !tt.HasText("启动时自动检查更新") || !tt.HasText("LoTwT/lucia") {
-		t.Errorf("updates page is missing its controls or source; texts: %v", tt.Texts())
-	}
 	if err := tt.Click("关于"); err != nil {
 		t.Fatal(err)
 	}
 	if model.page != PageAbout {
 		t.Fatalf("page %q, want about", model.page)
 	}
-	for _, want := range []string{"com.lotwt.lucia", "源码与发布记录"} {
+	for _, want := range []string{"检查更新", "启动时自动检查更新", "LoTwT/lucia", "源码与发布记录"} {
 		if !tt.HasText(want) {
 			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
 		}
 	}
-	if tt.HasText("MyGo 文档") {
-		t.Errorf("about page still shows the duplicate MyGo docs link; texts: %v", tt.Texts())
+	if err := tt.Click("桌宠"); err != nil {
+		t.Fatal(err)
+	}
+	if model.page != PageOverview {
+		t.Fatalf("page %q, want overview", model.page)
+	}
+	if !tt.HasText("显示桌宠") {
+		t.Fatalf("pet page does not show pet settings; texts: %v", tt.Texts())
+	}
+}
+
+func TestShowUpdatesOpensAbout(t *testing.T) {
+	model, _ := newTestModel(t, fakeSource{})
+	model.ShowUpdates()
+	if model.page != PageAbout {
+		t.Fatalf("page %q, want about", model.page)
 	}
 }
 
@@ -223,12 +229,12 @@ func TestAvailableUpdateShowsNotesAndInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt := ui.NewTester(model.View, 1000, 700)
-	if err := tt.Click("更新"); err != nil {
+	if err := tt.Click("关于"); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"发现新版本 0.2.0", "安装并重启", "新功能", "更快的启动"} {
 		if !tt.HasText(want) {
-			t.Errorf("updates page does not show %q; texts: %v", want, tt.Texts())
+			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
 		}
 	}
 }
@@ -236,18 +242,16 @@ func TestAvailableUpdateShowsNotesAndInstall(t *testing.T) {
 func TestDisabledBuildExplainsUpdates(t *testing.T) {
 	model := New(Config{
 		Version:  "0.0.1",
-		Commit:   "unknown",
-		Platform: "darwin/arm64",
 		DataDir:  "/tmp/lucia",
 		Updates:  updates.New(disabledSource{}, "0.0.1"),
 		Settings: settings.Default(),
 	})
 	tt := ui.NewTester(model.View, 1000, 700)
-	if err := tt.Click("更新"); err != nil {
+	if err := tt.Click("关于"); err != nil {
 		t.Fatal(err)
 	}
 	if !tt.HasText("当前构建未启用自动更新") {
-		t.Errorf("updates page does not explain the disabled build; texts: %v", tt.Texts())
+		t.Errorf("about page does not explain the disabled build; texts: %v", tt.Texts())
 	}
 }
 

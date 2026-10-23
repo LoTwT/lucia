@@ -99,8 +99,6 @@ func main() {
 	petSound := newPetSound()
 	model := appui.New(appui.Config{
 		Version:  info.Version,
-		Commit:   info.CommitLabel(),
-		Platform: buildinfo.Platform(),
 		DataDir:  paths.Data,
 		Updates:  manager,
 		Settings: prefs,

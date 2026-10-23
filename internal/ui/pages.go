@@ -10,16 +10,36 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 )
 
-func (m *Model) updatesPage(c *ui.Context) {
+func (m *Model) aboutPage(c *ui.Context) {
+	t := c.Theme()
+	panel(c, "", func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(16).Children(func() {
+			m.logoMark(c, 64)
+			ui.Column(c).Gap(3).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
+					ui.Text(c, "Lucia").FontSize(26).Bold()
+					ui.Badge(c, "v"+m.cfg.Version).TextColor(t.TextMuted)
+				})
+				ui.Text(c, "基于 MyGo 原生 UI 的桌面宠物").FontSize(13).TextColor(t.TextMuted)
+			})
+		})
+	})
+
+	m.updateStatusPanel(c)
+	m.releaseNotesPanel(c)
+	m.autoCheckPanel(c)
+	m.dataPanel(c)
+	m.aboutFooter(c)
+}
+
+func (m *Model) updateStatusPanel(c *ui.Context) {
 	t := c.Theme()
 	snap := m.cfg.Updates.Snapshot()
 
-	panel(c, "状态", func() {
+	panel(c, "更新状态", func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(9).Children(func() {
 			statusDot(c, phaseColor(t, snap.Phase))
 			ui.Text(c, phaseTitle(snap)).FontSize(16).Bold()
-			ui.Spacer(c)
-			ui.Badge(c, "当前 v"+m.cfg.Version).TextColor(t.TextMuted)
 		})
 		ui.Text(c, phaseDetail(snap)).FontSize(13).TextColor(t.TextMuted).MaxWidth(640)
 		if !snap.LastChecked.IsZero() && snap.Phase != updates.PhaseChecking {
@@ -54,26 +74,34 @@ func (m *Model) updatesPage(c *ui.Context) {
 			}
 		})
 	})
+}
 
-	if snap.Release != nil {
-		release := snap.Release
-		panel(c, "版本说明", func() {
-			ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-				ui.Text(c, "v"+release.Version).FontSize(15).Bold()
-				if !release.Date.IsZero() {
-					ui.Text(c, release.Date.Local().Format("2006-01-02")).FontSize(12).
-						TextColor(t.TextMuted)
-				}
-			})
-			notes := strings.TrimSpace(release.Notes)
-			if notes == "" {
-				ui.Text(c, "这个版本没有提供说明。").FontSize(13).TextColor(t.TextMuted)
-			} else {
-				markdown.View(c, notes, &m.md)
+func (m *Model) releaseNotesPanel(c *ui.Context) {
+	snap := m.cfg.Updates.Snapshot()
+	if snap.Release == nil {
+		return
+	}
+	t := c.Theme()
+	release := snap.Release
+	panel(c, "版本说明", func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
+			ui.Text(c, "v"+release.Version).FontSize(15).Bold()
+			if !release.Date.IsZero() {
+				ui.Text(c, release.Date.Local().Format("2006-01-02")).FontSize(12).
+					TextColor(t.TextMuted)
 			}
 		})
-	}
+		notes := strings.TrimSpace(release.Notes)
+		if notes == "" {
+			ui.Text(c, "这个版本没有提供说明。").FontSize(13).TextColor(t.TextMuted)
+		} else {
+			markdown.View(c, notes, &m.md)
+		}
+	})
+}
 
+func (m *Model) autoCheckPanel(c *ui.Context) {
+	t := c.Theme()
 	panel(c, "自动检查", func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
 			ui.Column(c).Gap(2).Grow(1).Children(func() {
@@ -91,41 +119,10 @@ func (m *Model) updatesPage(c *ui.Context) {
 				})
 		})
 	})
-
-	ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
-		ui.Icon(c, checkIcon).FontSize(13).TextColor(t.TextMuted)
-		if m.cfg.UpdateSource != "" {
-			ui.Textf(c, "更新由 MyGo 校验签名并从 GitHub Releases（%s）获取；开发构建不启用。",
-				m.cfg.UpdateSource).FontSize(12).TextColor(t.TextMuted)
-		} else {
-			ui.Text(c, "更新由 MyGo 校验签名并从 GitHub Releases 获取；开发构建不启用。").
-				FontSize(12).TextColor(t.TextMuted)
-		}
-	})
 }
 
-func (m *Model) aboutPage(c *ui.Context) {
+func (m *Model) dataPanel(c *ui.Context) {
 	t := c.Theme()
-	panel(c, "", func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(16).Children(func() {
-			m.logoMark(c, 64)
-			ui.Column(c).Gap(3).Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-					ui.Text(c, "Lucia").FontSize(26).Bold()
-					ui.Badge(c, "v"+m.cfg.Version).TextColor(t.TextMuted)
-				})
-				ui.Text(c, "基于 MyGo 原生 UI 的桌面宠物").FontSize(13).TextColor(t.TextMuted)
-			})
-		})
-	})
-
-	panel(c, "构建", func() {
-		m.infoRow(c, "版本", "v"+m.cfg.Version)
-		m.infoRow(c, "构建", m.cfg.Commit)
-		m.infoRow(c, "平台", m.cfg.Platform)
-		m.infoRow(c, "标识", "com.lotwt.lucia")
-	})
-
 	panel(c, "数据", func() {
 		ui.Text(c, "设置、窗口位置与更新状态保存在本机数据目录，不会写入安装目录。").
 			FontSize(13).TextColor(t.TextMuted)
@@ -143,11 +140,22 @@ func (m *Model) aboutPage(c *ui.Context) {
 			}
 		})
 	})
+}
 
+func (m *Model) aboutFooter(c *ui.Context) {
+	t := c.Theme()
+	ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+		ui.Icon(c, checkIcon).FontSize(13).TextColor(t.TextMuted)
+		if m.cfg.UpdateSource != "" {
+			ui.Textf(c, "更新由 MyGo 校验签名并从 GitHub Releases（%s）获取；开发构建不启用。",
+				m.cfg.UpdateSource).FontSize(12).TextColor(t.TextMuted)
+		} else {
+			ui.Text(c, "更新由 MyGo 校验签名并从 GitHub Releases 获取；开发构建不启用。").
+				FontSize(12).TextColor(t.TextMuted)
+		}
+	})
 	if m.cfg.RepositoryURL != "" {
-		panel(c, "链接", func() {
-			ui.Link(c, "源码与发布记录", m.cfg.RepositoryURL)
-		})
+		ui.Link(c, "源码与发布记录", m.cfg.RepositoryURL)
 	}
 }
 
