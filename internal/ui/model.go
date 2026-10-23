@@ -289,7 +289,7 @@ func (m *Model) SetPetVisible(visible bool) {
 
 func (m *Model) petCard(c *ui.Context) {
 	t := c.Theme()
-	panel(c, "桌宠", func() {
+	panel(c, "", func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
 			ui.Column(c).Gap(2).Grow(1).Children(func() {
 				ui.Text(c, "显示桌宠").FontSize(14)
