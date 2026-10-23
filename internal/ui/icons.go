@@ -9,10 +9,7 @@ func icon(shapes string) *ui.SVG {
 }
 
 var (
-	petIcon      = icon(`<circle cx="7" cy="7" r="1.4"/><circle cx="12" cy="5.5" r="1.4"/><circle cx="17" cy="7" r="1.4"/><path d="M8 15a4 4 0 0 1 8 0c0 2.2-1.8 4-4 4s-4-1.8-4-4Z"/>`)
-	aboutIcon    = icon(`<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>`)
-	refreshIcon  = icon(`<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>`)
-	downloadIcon = icon(`<path d="M12 4v10M8 11l4 4 4-4"/><path d="M5 19h14"/>`)
-	checkIcon    = icon(`<path d="M20 6 9 17l-5-5"/>`)
-	linkIcon     = icon(`<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>`)
+	petIcon   = icon(`<circle cx="7" cy="7" r="1.4"/><circle cx="12" cy="5.5" r="1.4"/><circle cx="17" cy="7" r="1.4"/><path d="M8 15a4 4 0 0 1 8 0c0 2.2-1.8 4-4 4s-4-1.8-4-4Z"/>`)
+	aboutIcon = icon(`<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>`)
+	checkIcon = icon(`<path d="M20 6 9 17l-5-5"/>`)
 )

@@ -436,7 +436,7 @@ func phaseTitle(s updates.Snapshot) string {
 func phaseDetail(s updates.Snapshot) string {
 	switch s.Phase {
 	case updates.PhaseUnavailable:
-		return "开发运行、未配置更新源或安装位置不可写时不会检查更新；正式安装版会启用。"
+		return "开发运行、未配置更新源或安装位置不可写时不会检查更新。"
 	case updates.PhaseIdle:
 		return "点击“检查更新”读取 GitHub Releases 中的签名更新。"
 	case updates.PhaseChecking:

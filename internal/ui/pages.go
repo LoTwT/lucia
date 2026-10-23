@@ -27,7 +27,7 @@ func (m *Model) aboutPage(c *ui.Context) {
 	m.updateStatusPanel(c)
 	m.releaseNotesPanel(c)
 	m.dataPanel(c)
-	m.aboutFooter(c)
+	m.aboutLinks(c)
 }
 
 func (m *Model) updateStatusPanel(c *ui.Context) {
@@ -86,6 +86,16 @@ func (m *Model) updateStatusPanel(c *ui.Context) {
 						}
 					})
 			})
+			ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+				ui.Icon(c, checkIcon).FontSize(13).TextColor(t.TextMuted)
+				if m.cfg.UpdateSource != "" {
+					ui.Textf(c, "更新经签名校验后从 GitHub Releases（%s）获取。",
+						m.cfg.UpdateSource).FontSize(12).TextColor(t.TextMuted)
+				} else {
+					ui.Text(c, "更新经签名校验后从 GitHub Releases 获取。").
+						FontSize(12).TextColor(t.TextMuted)
+				}
+			})
 		}
 	})
 }
@@ -135,20 +145,7 @@ func (m *Model) dataPanel(c *ui.Context) {
 	})
 }
 
-func (m *Model) aboutFooter(c *ui.Context) {
-	t := c.Theme()
-	if m.cfg.Updates.Snapshot().Phase != updates.PhaseUnavailable {
-		ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
-			ui.Icon(c, checkIcon).FontSize(13).TextColor(t.TextMuted)
-			if m.cfg.UpdateSource != "" {
-				ui.Textf(c, "更新经签名校验后从 GitHub Releases（%s）获取。",
-					m.cfg.UpdateSource).FontSize(12).TextColor(t.TextMuted)
-			} else {
-				ui.Text(c, "更新经签名校验后从 GitHub Releases 获取。").
-					FontSize(12).TextColor(t.TextMuted)
-			}
-		})
-	}
+func (m *Model) aboutLinks(c *ui.Context) {
 	if m.cfg.RepositoryURL != "" {
 		ui.Link(c, "源码与发布记录", m.cfg.RepositoryURL)
 	}
