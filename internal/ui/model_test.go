@@ -262,6 +262,23 @@ func TestShowOverviewReturnsToPetSettings(t *testing.T) {
 	}
 }
 
+func TestUpToDateShowsLastCheckedOnce(t *testing.T) {
+	model, manager := newTestModel(t, fakeSource{})
+	if err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("关于"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("已是最新版本") || !tt.HasText("上次检查：") {
+		t.Errorf("about page is missing the up-to-date status or last check; texts: %v", tt.Texts())
+	}
+	if tt.HasText("当前版本已是最新，上次检查于") {
+		t.Errorf("about page duplicated the last-check detail; texts: %v", tt.Texts())
+	}
+}
+
 func TestAvailableUpdateShowsNotesAndInstall(t *testing.T) {
 	date := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	src := fakeSource{release: &updates.Release{
@@ -277,10 +294,13 @@ func TestAvailableUpdateShowsNotesAndInstall(t *testing.T) {
 	if err := tt.Click("关于"); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"发现新版本 0.2.0", "安装并重启", "新功能", "更快的启动"} {
+	for _, want := range []string{"发现新版本 0.2.0", "安装后会自动重启进入新版本。", "安装并重启", "新功能", "更快的启动"} {
 		if !tt.HasText(want) {
 			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
 		}
+	}
+	if tt.HasText("新版本 0.2.0 已就绪") {
+		t.Errorf("about page duplicated the release version; texts: %v", tt.Texts())
 	}
 }
 
