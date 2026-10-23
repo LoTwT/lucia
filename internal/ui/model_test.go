@@ -44,12 +44,15 @@ func newTestModel(t *testing.T, src updates.Source) (*Model, *updates.Manager) {
 	return model, manager
 }
 
-func TestOverviewShowsBuildIdentity(t *testing.T) {
+func TestAboutShowsBuildIdentity(t *testing.T) {
 	model, _ := newTestModel(t, fakeSource{})
 	tt := ui.NewTester(model.View, 1000, 700)
-	for _, want := range []string{"Lucia", "v0.0.1", "运行信息", "0123456789ab", "darwin/arm64"} {
+	if err := tt.Click("关于"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Lucia", "v0.0.1", "构建", "0123456789ab", "darwin/arm64", "com.lotwt.lucia"} {
 		if !tt.HasText(want) {
-			t.Errorf("overview does not show %q; texts: %v", want, tt.Texts())
+			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
 		}
 	}
 }
@@ -69,8 +72,11 @@ func TestOverviewShowsPetControls(t *testing.T) {
 	tt := ui.NewTester(model.View, 1000, 700)
 	for _, want := range []string{"桌宠", "显示桌宠", "桌宠大小", "互动音效", "气泡频率", "开机自启", "重置桌宠位置"} {
 		if !tt.HasText(want) {
-			t.Errorf("overview does not show %q; texts: %v", want, tt.Texts())
+			t.Errorf("pet page does not show %q; texts: %v", want, tt.Texts())
 		}
+	}
+	if tt.HasText("运行信息") {
+		t.Errorf("pet page still shows the duplicate runtime card; texts: %v", tt.Texts())
 	}
 }
 
@@ -173,8 +179,8 @@ func TestSidebarNavigatesToUpdatesAndAbout(t *testing.T) {
 	if model.page != PageUpdates {
 		t.Fatalf("page %q, want updates", model.page)
 	}
-	if !tt.HasText("检查更新") || !tt.HasText("启动时自动检查更新") {
-		t.Errorf("updates page is missing its controls; texts: %v", tt.Texts())
+	if !tt.HasText("检查更新") || !tt.HasText("启动时自动检查更新") || !tt.HasText("LoTwT/lucia") {
+		t.Errorf("updates page is missing its controls or source; texts: %v", tt.Texts())
 	}
 	if err := tt.Click("关于"); err != nil {
 		t.Fatal(err)
@@ -182,10 +188,13 @@ func TestSidebarNavigatesToUpdatesAndAbout(t *testing.T) {
 	if model.page != PageAbout {
 		t.Fatalf("page %q, want about", model.page)
 	}
-	for _, want := range []string{"com.lotwt.lucia", "MyGo 文档", "LoTwT/lucia"} {
+	for _, want := range []string{"com.lotwt.lucia", "源码与发布记录"} {
 		if !tt.HasText(want) {
 			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
 		}
+	}
+	if tt.HasText("MyGo 文档") {
+		t.Errorf("about page still shows the duplicate MyGo docs link; texts: %v", tt.Texts())
 	}
 }
 

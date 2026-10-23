@@ -114,11 +114,9 @@ func (m *Model) aboutPage(c *ui.Context) {
 					ui.Text(c, "Lucia").FontSize(26).Bold()
 					ui.Badge(c, "v"+m.cfg.Version).TextColor(t.TextMuted)
 				})
-				ui.Text(c, "基于 MyGo 原生 UI 的桌面应用").FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, "基于 MyGo 原生 UI 的桌面宠物").FontSize(13).TextColor(t.TextMuted)
 			})
 		})
-		ui.Text(c, "一个可运行、可打包、可发版的 MyGo 应用底座：原生界面、设置持久化、诊断日志、签名更新与双平台发布流程已经接好。").
-			FontSize(13).TextColor(t.TextMuted).MaxWidth(620)
 	})
 
 	panel(c, "构建", func() {
@@ -126,9 +124,6 @@ func (m *Model) aboutPage(c *ui.Context) {
 		m.infoRow(c, "构建", m.cfg.Commit)
 		m.infoRow(c, "平台", m.cfg.Platform)
 		m.infoRow(c, "标识", "com.lotwt.lucia")
-		if m.cfg.UpdateSource != "" {
-			m.infoRow(c, "更新源", m.cfg.UpdateSource)
-		}
 	})
 
 	panel(c, "数据", func() {
@@ -149,16 +144,11 @@ func (m *Model) aboutPage(c *ui.Context) {
 		})
 	})
 
-	panel(c, "链接", func() {
-		ui.Row(c).Gap(18).Wrap().Children(func() {
-			ui.Link(c, "MyGo 文档", "https://mygo.egoist.dev/docs/")
-			if m.cfg.RepositoryURL != "" {
-				ui.Link(c, "源码与发布记录", m.cfg.RepositoryURL)
-			}
+	if m.cfg.RepositoryURL != "" {
+		panel(c, "链接", func() {
+			ui.Link(c, "源码与发布记录", m.cfg.RepositoryURL)
 		})
-		ui.Text(c, "MyGo v0.5.5 · Go 1.27.2 · 更新私钥只保存在发布环境，不进入仓库。").
-			FontSize(12).TextColor(t.TextMuted)
-	})
+	}
 }
 
 func (m *Model) saveSettings() {

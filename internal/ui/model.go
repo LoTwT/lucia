@@ -175,7 +175,7 @@ func (m *Model) sidebar(c *ui.Context) {
 		m.brand(c)
 		ui.Sidebar(c, &m.page, func() {
 			ui.SidebarSection(c, "应用", nil, func() {
-				ui.SidebarItem(c, PageOverview, overviewIcon, "概览")
+				ui.SidebarItem(c, PageOverview, overviewIcon, "桌宠")
 				ui.SidebarItem(c, PageUpdates, updatesIcon, "更新").Children(func() {
 					if phase := m.cfg.Updates.Snapshot().Phase; phase == updates.PhaseAvailable {
 						ui.Badge(c, "新")
@@ -194,7 +194,7 @@ func (m *Model) brand(c *ui.Context) {
 		m.logoMark(c, 34)
 		ui.Column(c).Gap(0).Children(func() {
 			ui.Text(c, "Lucia").FontSize(16).Bold()
-			ui.Text(c, "MyGo 原生应用").FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, "桌面宠物").FontSize(11).TextColor(t.TextMuted)
 		})
 	})
 }
@@ -222,17 +222,12 @@ func (m *Model) pageHeading() (title, subtitle string) {
 	case PageAbout:
 		return "关于", "构建信息、数据位置与项目入口"
 	default:
-		return "概览", "Lucia 的运行状态与常用操作"
+		return "桌宠", "设置桌宠的显示方式、声音与互动行为"
 	}
 }
 
 func (m *Model) overviewPage(c *ui.Context) {
-	m.hero(c)
 	m.petCard(c)
-	ui.Row(c).Gap(16).AlignItems(ui.Stretch).Children(func() {
-		m.statusCard(c)
-		m.updateSummaryCard(c)
-	})
 }
 
 var petScaleChoices = []string{"小（0.8×）", "标准（1.0×）", "大（1.25×）", "特大（1.5×）"}
@@ -380,83 +375,11 @@ func (m *Model) petCard(c *ui.Context) {
 	})
 }
 
-func (m *Model) hero(c *ui.Context) {
-	ui.Column(c).Padding(26).Gap(14).Radius(14).
-		LinearGradient(ui.LinearGradient{
-			From:  ui.Hex("#1e1b4b"),
-			To:    ui.Hex("#4c1d95"),
-			Angle: 125,
-		}).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(16).Children(func() {
-			m.logoMark(c, 58)
-			ui.Column(c).Gap(3).Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-					ui.Text(c, "Lucia").FontSize(28).Bold().TextColor(ui.Hex("#faf5ff"))
-					ui.Badge(c, "v"+m.cfg.Version).Background(ui.RGBA(255, 255, 255, 0.16)).
-						TextColor(ui.Hex("#faf5ff"))
-				})
-				ui.Text(c, "轻量、原生的 MyGo 桌面应用").FontSize(14).
-					TextColor(ui.RGBA(250, 245, 255, 0.72))
-			})
-		})
-		ui.Text(c, "界面由 MyGo 原生绘制，无需 WebView；更新由内置的签名校验链路从 GitHub Releases 获取。").
-			FontSize(13).TextColor(ui.RGBA(250, 245, 255, 0.78)).MaxWidth(620)
-	})
-}
-
-func (m *Model) statusCard(c *ui.Context) {
-	card(c, "运行信息", func() {
-		m.infoRow(c, "版本", "v"+m.cfg.Version)
-		m.infoRow(c, "构建", m.cfg.Commit)
-		m.infoRow(c, "平台", m.cfg.Platform)
-		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			ui.Text(c, "数据").FontSize(12).TextColor(c.Theme().TextMuted).Width(52)
-			ui.Text(c, m.cfg.DataDir).FontSize(12).Grow(1).SingleLine().Selectable().
-				Tooltip(m.cfg.DataDir)
-			if m.cfg.OpenDataDir != nil {
-				if ui.Button(c, "").Label("打开数据目录").Tooltip("打开数据目录").
-					Children(func() { ui.Icon(c, folderIcon) }).Clicked() {
-					if err := m.cfg.OpenDataDir(); err != nil {
-						m.actionErr = fmt.Sprintf("打开数据目录失败：%v", err)
-					} else {
-						m.actionErr = ""
-					}
-				}
-			}
-		})
-	})
-}
-
-func (m *Model) updateSummaryCard(c *ui.Context) {
-	t := c.Theme()
-	snap := m.cfg.Updates.Snapshot()
-	card(c, "更新", func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			statusDot(c, phaseColor(t, snap.Phase))
-			ui.Text(c, phaseTitle(snap)).FontSize(14).Bold()
-		})
-		ui.Text(c, phaseDetail(snap)).FontSize(12).TextColor(t.TextMuted)
-		ui.Row(c).Gap(8).Children(func() {
-			if ui.Button(c, "").Children(func() {
-				ui.Icon(c, arrowIcon)
-				ui.Text(c, "打开更新")
-			}).Clicked() {
-				m.page = PageUpdates
-			}
-		})
-	})
-}
-
 func (m *Model) infoRow(c *ui.Context, label, value string) {
 	ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
 		ui.Text(c, label).FontSize(12).TextColor(c.Theme().TextMuted).Width(52)
 		ui.Text(c, value).FontSize(12).Grow(1).Selectable()
 	})
-}
-
-// card draws a titled surface that shares a row with another card.
-func card(c *ui.Context, title string, body func()) ui.Element {
-	return panelElement(c, title, body).Grow(1).Basis(0)
 }
 
 // panel draws a titled surface across the content column.
