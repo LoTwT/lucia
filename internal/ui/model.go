@@ -169,7 +169,7 @@ func (m *Model) sidebar(c *ui.Context) {
 		m.brand(c)
 		ui.Sidebar(c, &m.page, func() {
 			ui.SidebarSection(c, "应用", nil, func() {
-				ui.SidebarItem(c, PageOverview, overviewIcon, "桌宠")
+				ui.SidebarItem(c, PageOverview, petIcon, "桌宠")
 				ui.SidebarItem(c, PageAbout, aboutIcon, "关于").Children(func() {
 					if phase := m.cfg.Updates.Snapshot().Phase; phase == updates.PhaseAvailable {
 						ui.Badge(c, "新")
@@ -293,7 +293,7 @@ func (m *Model) petCard(c *ui.Context) {
 		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
 			ui.Column(c).Gap(2).Grow(1).Children(func() {
 				ui.Text(c, "显示桌宠").FontSize(14)
-				ui.Text(c, "隐藏后仍可从托盘重新显示；该状态会保留到下次启动。").FontSize(12).
+				ui.Text(c, "隐藏后可从托盘重新显示；重启后保持当前选择。").FontSize(12).
 					TextColor(t.TextMuted)
 			})
 			ui.Switch(c, &m.settings.PetVisible).Label("显示桌宠").OnChange(func() {
@@ -322,7 +322,7 @@ func (m *Model) petCard(c *ui.Context) {
 		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
 			ui.Column(c).Gap(2).Grow(1).Children(func() {
 				ui.Text(c, "互动音效").FontSize(14)
-				ui.Text(c, "摸脸和摸摸头时播放一段轻短的提示音，默认关闭。").FontSize(12).
+				ui.Text(c, "摸脸和摸摸头时播放一小段提示音。").FontSize(12).
 					TextColor(t.TextMuted)
 			})
 			ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(m.saveSettings)
@@ -357,11 +357,18 @@ func (m *Model) petCard(c *ui.Context) {
 		}
 
 		if m.cfg.ResetPetPosition != nil {
-			if ui.Button(c, "重置桌宠位置").Clicked() {
-				m.settings.PetVisible = true
-				m.saveSettings()
-				m.cfg.ResetPetPosition()
-			}
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "桌宠位置").FontSize(14)
+					ui.Text(c, "移回主屏右下角；隐藏时会重新显示。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				if ui.Button(c, "重置").Clicked() {
+					m.settings.PetVisible = true
+					m.saveSettings()
+					m.cfg.ResetPetPosition()
+				}
+			})
 		}
 	})
 }
@@ -435,15 +442,9 @@ func phaseDetail(s updates.Snapshot) string {
 	case updates.PhaseChecking:
 		return "正在读取更新清单并比较版本。"
 	case updates.PhaseUpToDate:
-		if s.LastChecked.IsZero() {
-			return "当前版本已是最新。"
-		}
-		return "当前版本已是最新，上次检查于 " + s.LastChecked.Local().Format("15:04") + "。"
+		return ""
 	case updates.PhaseAvailable:
-		if s.Release != nil {
-			return "新版本 " + s.Release.Version + " 已就绪，可安装并重启。"
-		}
-		return "新版本已就绪，可安装并重启。"
+		return "安装后会自动重启进入新版本。"
 	case updates.PhaseDownloading:
 		if s.Total > 0 {
 			return fmt.Sprintf("已下载 %s / %s。", formatBytes(s.Downloaded), formatBytes(s.Total))

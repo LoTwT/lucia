@@ -71,13 +71,58 @@ func TestOverviewShowsPetControls(t *testing.T) {
 		ResetPetPosition: func() {},
 	})
 	tt := ui.NewTester(model.View, 1000, 700)
-	for _, want := range []string{"桌宠", "显示桌宠", "桌宠大小", "互动音效", "气泡频率", "开机自启", "重置桌宠位置"} {
+	for _, want := range []string{
+		"桌宠",
+		"显示桌宠",
+		"隐藏后可从托盘重新显示；重启后保持当前选择。",
+		"桌宠大小",
+		"互动音效",
+		"摸脸和摸摸头时播放一小段提示音。",
+		"气泡频率",
+		"开机自启",
+		"桌宠位置",
+		"移回主屏右下角；隐藏时会重新显示。",
+		"重置",
+	} {
 		if !tt.HasText(want) {
 			t.Errorf("pet page does not show %q; texts: %v", want, tt.Texts())
 		}
 	}
 	if tt.HasText("运行信息") {
 		t.Errorf("pet page still shows the duplicate runtime card; texts: %v", tt.Texts())
+	}
+}
+
+func TestResetPetPositionRow(t *testing.T) {
+	reset := false
+	prefs := settings.Default()
+	prefs.PetVisible = false
+	model := New(Config{
+		Version:          "0.0.1",
+		DataDir:          "/tmp/lucia",
+		Updates:          updates.New(disabledSource{}, "0.0.1"),
+		Settings:         prefs,
+		ResetPetPosition: func() { reset = true },
+	})
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("重置"); err != nil {
+		t.Fatal(err)
+	}
+	if !reset || !model.settings.PetVisible {
+		t.Fatalf("reset=%v visible=%v, want true/true", reset, model.settings.PetVisible)
+	}
+}
+
+func TestPhaseDetailDeduplicatesUpdateStatus(t *testing.T) {
+	if got := phaseDetail(updates.Snapshot{Phase: updates.PhaseUpToDate}); got != "" {
+		t.Fatalf("up-to-date detail = %q, want empty", got)
+	}
+	got := phaseDetail(updates.Snapshot{
+		Phase:   updates.PhaseAvailable,
+		Release: &updates.Release{Version: "0.2.0"},
+	})
+	if got != "安装后会自动重启进入新版本。" {
+		t.Fatalf("available detail = %q", got)
 	}
 }
 
@@ -241,10 +286,11 @@ func TestAvailableUpdateShowsNotesAndInstall(t *testing.T) {
 
 func TestDisabledBuildExplainsUpdates(t *testing.T) {
 	model := New(Config{
-		Version:  "0.0.1",
-		DataDir:  "/tmp/lucia",
-		Updates:  updates.New(disabledSource{}, "0.0.1"),
-		Settings: settings.Default(),
+		Version:      "0.0.1",
+		DataDir:      "/tmp/lucia",
+		Updates:      updates.New(disabledSource{}, "0.0.1"),
+		Settings:     settings.Default(),
+		UpdateSource: "LoTwT/lucia",
 	})
 	tt := ui.NewTester(model.View, 1000, 700)
 	if err := tt.Click("关于"); err != nil {
@@ -252,6 +298,9 @@ func TestDisabledBuildExplainsUpdates(t *testing.T) {
 	}
 	if !tt.HasText("当前构建未启用自动更新") {
 		t.Errorf("about page does not explain the disabled build; texts: %v", tt.Texts())
+	}
+	if tt.HasText("LoTwT/lucia") {
+		t.Errorf("disabled build still shows the update source; texts: %v", tt.Texts())
 	}
 }
 
