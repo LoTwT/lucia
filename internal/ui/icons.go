@@ -12,4 +12,5 @@ var (
 	petIcon   = icon(`<circle cx="7" cy="7" r="1.4"/><circle cx="12" cy="5.5" r="1.4"/><circle cx="17" cy="7" r="1.4"/><path d="M8 15a4 4 0 0 1 8 0c0 2.2-1.8 4-4 4s-4-1.8-4-4Z"/>`)
 	aboutIcon = icon(`<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>`)
 	checkIcon = icon(`<path d="M20 6 9 17l-5-5"/>`)
+	packIcon  = icon(`<path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>`)
 )

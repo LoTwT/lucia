@@ -100,19 +100,30 @@
 ### 目录与 manifest
 
 - 素材包放在 `<数据目录>/packs/<id>/pack.json`，clip 文件放在 `clips/`，统一使用 ASCII 文件名。
-- `pack.json` 的 `schema` 当前为 `1`；`canvas`、`crop`、`base.window`、`base.sprite`、`face`、`bubbleAnchor` 定义几何；`clips` 保存文件名、帧数、循环标志和 SHA-256；`actions` 把 idle、happy、laugh、drag 和 6 个特殊动作映射到 clip。
+- `pack.json` 支持 `schema` `1` 与 `2`。schema 1 读取时升级为 schema 2 默认值；新导入写 schema 2。`canvas`、`crop`、`base.window`、`base.sprite`、`face`、`bubbleAnchor` 定义几何；`clips` 保存文件名、帧数、循环标志和 SHA-256；`actions` 把 idle、happy、laugh、drag 和特殊动作映射到 clip。schema 2 另含 `hotzones`、`presets` 和动作级 `timing`，完整合同见下文“schema 2 热区、预设与时序”。
 - `crop` 是素材画布内的不透明区域并集（导入时计算，外扩 2 px），用于减少透明边距；播放时先合成完整画布再裁剪。
 - 画布与窗口边长上限为 4096 px，单个 clip 帧数上限为 1000；解码器在分配画布前再次校验，畸形素材只会得到错误而不会 panic。
 - `base.window` / `base.sprite` 单位为 DIP；`face` 与 `bubbleAnchor` 归一化到裁剪后的实际立绘。
-- 导入工具 `cmd/petpack` 读取 zip，优先解析每个条目的 `0x7075` Unicode Path 扩展字段（校验其中记录的 CRC32）；缺失时按 GBK 解码中文名。clip ID 只依赖文件名开头的 ASCII 部分，避免编码差异影响识别；`__MACOSX/` 与 `._*` 资源叉条目会被跳过。
-- 导入只接受 `.webp`，丢弃 MP4 预览；限制单文件 64 MiB、解压总量 512 MiB，防止 zip-slip 与 zip 炸弹；先写临时目录，旧包备份后安装新包并校验，失败时回滚。
-- 素材包 manifest 写入 `license.status = "local-only"`；naiwa 素材不进入仓库、CI、安装包或发布资产。导入前必须由用户确认本地使用授权。
-- 导入命令（默认写入开发版数据目录）：
+- 控制台与 `cmd/petpack` 共用导入器。zip 根部的 `pack.json` 或 `pack.meta.json` 提供 id、名称、几何、动作、热区和预设；缺失时从 zip 文件名推导 id 并使用默认几何。导入器读取 zip 时优先解析每个条目的 `0x7075` Unicode Path 扩展字段（校验其中记录的 CRC32）；缺失时按 GBK 解码中文名。clip ID 只依赖文件名开头的 ASCII 部分，避免编码差异影响识别；`__MACOSX/` 与 `._*` 资源叉条目会被跳过。
+- 导入只接受 `.webp`，丢弃 MP4 预览；限制 manifest 4 MiB、单文件 64 MiB、解压总量 512 MiB，防止 zip-slip 与 zip 炸弹；先写临时目录，旧包备份后安装新包并校验，失败时回滚。控制台拒绝静默覆盖同名包；`cmd/petpack -force` 明确要求覆盖。
+- 素材包 manifest 写入 `license.status = "local-only"`；naiwa 素材不进入仓库、CI、安装包或发布资产。控制台导入前必须勾选本地使用授权。
+- 控制台流程：素材包页 → 选择 zip → 勾选授权 →（可选）勾选替换同名包 → “导入并启用”。导入成功后桌宠立即切换；失败时保留原模型与原设置。列表可启用、删除未使用的包、切回内置鲸鱼，并预览静态海报与热区。正在使用的包不能删除。
+- 开发命令（默认写入开发版数据目录）：
   ```sh
   go run ./cmd/petpack -zip naiwa.zip
   go run ./cmd/petpack -zip naiwa.zip -app Lucia   # 显式指定打包版
+  go run ./cmd/petpack -check <pack-dir> -strict   # 校验已安装包
   ```
-  `-force` 覆盖同名包，`-activate=false` 只导入不切换。数据目录默认自动选择最近使用的 `Lucia Dev`、`lucia` 或 `Lucia`；`go tool mygo dev` 用 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 用 `lucia`，打包版用 `Lucia`。导入前退出 Lucia，导入后重新启动生效。
+  `-force` 覆盖同名包，`-activate=false` 只导入不切换。数据目录默认自动选择最近使用的 `Lucia Dev`、`lucia` 或 `Lucia`；`go tool mygo dev` 用 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 用 `lucia`，打包版用 `Lucia`。开发工具导入时若应用正在运行，需要重启或从控制台重新启用。
+
+### schema 2 热区、预设与时序
+
+- `face` 保留为 schema 1 的脸部热区来源；schema 2 定义 `hotzones` 时可以省略 `face`，但若填写就必须是合法的归一化矩形。
+- `hotzones` 是 id 到点击区域的映射：`rect` 归一化到 `crop`，`label` 用于无障碍与预览，`preset` 引用一个预设，`action` 是该预设没有 steps 时的回退动作。未定义 `hotzones` 时，schema 1 的 `face` 自动成为 `face` 热区，使用 `tap` 预设。
+- `presets` 是可复用交互序列：`reaction` 与 `bubble` 取 `face`、`pat`、`none`；`steps` 每项 `{action, delayMs}`，`delayMs` 在上一步结束后、下一步开始前等待 0–60000 ms。预设有 steps 时优先执行 steps；没有 steps 时使用热区的 `action`。`tap`/`pat` 是保留的内置预设名。
+- 动作级 `timing.enterHoldMs`、`loopHoldMs`、`exitHoldMs` 在对应阶段最后一帧后额外停留 0–60000 ms，不修改 WebP 的帧时长。`loopCount` 仍决定循环遍数，`-1` 表示持续循环。
+- 校验拒绝：未知 preset/action、空 rect 或超出 0–1 的 rect、非法 reaction/bubble、负数或超过 60 秒的 delay/hold、循环预设步骤（`loopCount < 0` 的动作不能作为有限步骤）。schema 1 与 schema 2 都通过同一解析与校验路径，播放器只消费 schema 2 内存结构。
+- 示例 manifest 见 [docs/examples/pet-pack.schema2.json](../examples/pet-pack.schema2.json)；示例中的 `frames` 是结构示意，实际值必须与 WebP 文件一致。
 
 ### 解码与播放
 
@@ -121,20 +132,20 @@
 - 每帧使用自身时长（41/42 ms，特殊动作存在 500 ms、1083 ms 的停顿帧），不能按固定 24 fps 推导。
 - idle 在启动时先显示海报帧，再在后台解码并缓存全部帧；缓存按同一比例缩放到 `base.sprite × 2` 以内，不超过 `crop` 原生尺寸，保持 `crop` 宽高比。naiwa 的裁剪为 379×577，缓存约 84 MB。
 - 其他 clip 不预加载，播放时按顺序解码；解码发生在 UI 线程，单帧约 6 ms，低于 24 fps 的 41.7 ms 预算。若后续真机出现卡顿，再增加后台预读环形缓冲。
-- 状态机按“拖动 > 用户互动 > 特殊动作 > 困倦 > idle”排序。`enter` 播完进入 `loop`；`loopCount = 0` 直接进入 `exit`，`loopCount = -1` 持续循环直到状态结束，`loopCount > 0` 播完指定遍数后进入 `exit`。
+- 状态机按“拖动 > 用户互动 > 特殊动作 > 困倦 > idle”排序。`enter` 播完进入 `loop`；`loopCount = 0` 直接进入 `exit`，`loopCount = -1` 持续循环直到状态结束，`loopCount > 0` 播完指定遍数后进入 `exit`。预设 steps 在当前动作自然结束后按 delay 链式启动；拖动、手动动作和 Reduce Motion 会清空未开始的序列。
 - idle 与拖动循环使用缓存/流式帧；特殊动作只播一次。素材没有睡眠动画，困倦时播一次 `sleep_denial`，睡着后冻结在 idle 海报帧。
 - 系统事件接法：更新检查/下载阶段播 `think`，更新失败播 `sad`；首次启动和“重置位置”播一次 `wave`。`listen` 与 `speak` 暂时只保留在 manifest 中，等有稳定的产品触发源和气泡时长联动后再接。
 - Reduce Motion 不播连续动画：idle 显示静态海报，互动显示对应动作海报 1.2 秒，拖动显示 drag 海报，特殊动作入口隐藏；状态切换时才预约下一帧。
-- 动画素材不再叠加程序化呼吸、压扁或上抬；内置鲸鱼保持原有程序化效果。
+- 动画素材不再叠加程序化呼吸、压扁或上抬；内置鲸鱼保持原有程序化效果。点击热区与右键“摸摸头”都走同一 preset 入口；没有自定义 preset 时回退到 `laugh`/`happy` 的内置反应。
 - 动画时钟仍由 `ui.Context.Now()` 推导；idle 缓存的后台解码是唯一新增的后台工作，它不驱动 UI，完成后由下一次调度帧读取。
 
 ## 非目标
 
-当前增量不包含：`listen` 的产品触发源、`speak` 与气泡时长联动、控制台动作预览页、控制台 zip 导入 UI、随机闲时动作开关、按 clip 单独配置热点、Windows 真机验收。`edge_peek` 目前只作为手动特殊动作，不实现窗口越界探头。
+当前增量不包含：可视化拖拽编辑热区/预设、按 clip 单独配置热点、`listen` 的产品触发源、`speak` 与气泡时长联动、随机闲时动作开关、Windows 真机验收。`edge_peek` 目前只作为手动特殊动作，不实现窗口越界探头。
 
 ## 后续产品项
 
-- 终端用户素材包流程：控制台提供导入 zip、校验预览、启用/切换/删除素材包；导入器合并 zip 内的 `pack.json` 或 `pack.meta.json`/preset，避免用户需要 Go 工具或手改 `settings.json`。当前 `cmd/petpack` 仍只是开发工具，不随安装包分发。
+- 可视化素材编辑器：在控制台里拖拽热区、编辑预设 steps 与 timing，并直接写回 `pack.json`。当前 PR 提供 manifest 级合同、静态预览与导入管理，编辑器留待后续。
 - 小动作入口：已按试用反馈把六个特殊动作从“小动作”二级菜单移到右键一级菜单；后续再根据实际使用评估最近使用或独立动作面板。
 
 ## 验收
@@ -148,7 +159,7 @@ go test ./...
 go tool mygo vet .
 ```
 
-`internal/petpack` 覆盖：tiny 动画 WebP 的 ANMF 解析、部分帧、blend/dispose、VP8L 与 lossy ALPH、裁剪缩放、manifest 校验、海报帧、zip 导入、0x7075/GBK 文件名、clip ID 归一化。`internal/pet` 覆盖：内置三帧布局、非方形布局、脸部热区、气泡锚点、静态 View，以及动画 idle 循环、点脸→laugh→idle、拖动链、特殊动作菜单、Reduce Motion 海报。`internal/settings` 覆盖新字段默认值与持久化。
+`internal/petpack` 覆盖：tiny 动画 WebP 的 ANMF 解析、部分帧、blend/dispose、VP8L 与 lossy ALPH、裁剪缩放、schema 1 升级、schema 2 热区/预设/时序校验、manifest 海报、zip 导入与 manifest 合并、Store 导入/激活/删除、lockfile、pending/backup 恢复、预览 PNG、0x7075/GBK 文件名、clip ID 归一化。`internal/pet` 覆盖：内置三帧布局、非方形布局、脸部热区、气泡锚点、静态 View，以及动画 idle 循环、点脸→laugh→idle、拖动链、特殊动作菜单、热区点击→preset、步骤延迟、动作停留时序、Reduce Motion 海报。`internal/settings` 覆盖 Store 并发/失败/字段保留；`internal/ui` 覆盖素材包列表、无效包说明、导入授权、导入后启用与删除。
 
 macOS 真机手工检查（待补验）：
 

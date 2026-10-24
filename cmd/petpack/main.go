@@ -25,10 +25,12 @@ func main() {
 	packName := flag.String("name", "naiwa", "display name")
 	force := flag.Bool("force", false, "replace an existing pack with the same id")
 	activate := flag.Bool("activate", true, "select this pack in settings.json")
+	checkDir := flag.String("check", "", "validate a pack directory and exit")
+	strict := flag.Bool("strict", false, "with -check, require schema 2 interaction data")
 	flag.Parse()
 
-	if *zipPath == "" {
-		fmt.Fprintln(os.Stderr, "usage: petpack -zip <naiwa.zip> [-app <name> | -data <dir>] [-force]")
+	if *zipPath == "" && *checkDir == "" {
+		fmt.Fprintln(os.Stderr, "usage: petpack (-zip <pack.zip> | -check <pack-dir>) [-app <name> | -data <dir>] [-force] [-strict]")
 		os.Exit(2)
 	}
 	data := *dataDir
@@ -43,7 +45,15 @@ func main() {
 		}
 		data = paths.Data
 	}
+	if *checkDir != "" {
+		checkPack(*checkDir, *strict)
+		return
+	}
 	if err := os.MkdirAll(data, 0o755); err != nil {
+		log.Fatal(err)
+	}
+	store := petpack.NewStore(data, "")
+	if err := store.Recover(); err != nil {
 		log.Fatal(err)
 	}
 	pack, err := petpack.ImportZip(*zipPath, filepath.Join(data, "packs"), petpack.ImportOptions{
@@ -61,13 +71,23 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if _, err := store.List(); err != nil {
+		log.Fatalf("refresh pack lockfile: %v", err)
+	}
 	if *activate {
 		prefs, err := settings.Load(data)
 		if err != nil {
 			log.Fatalf("settings: %v (the pack was imported but not activated; fix the settings file and retry)", err)
 		}
-		prefs.PetPack = pack.Manifest.ID
-		if err := settings.Save(data, prefs); err != nil {
+		settingsStore := settings.NewStore(data, prefs)
+		updated, err := settingsStore.Update(func(s *settings.Settings) {
+			s.PetPack = pack.Manifest.ID
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		prefs = updated
+		if err := store.SetActive(pack.Manifest.ID); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -111,4 +131,35 @@ func detectAppName() string {
 	}
 	sort.Slice(existing, func(i, j int) bool { return existing[i].mod.After(existing[j].mod) })
 	return existing[0].name
+}
+
+// checkPack validates one installed directory without importing it. The
+// strict mode is aimed at schema 2 authoring: it requires hotzones and
+// presets so a pack exercised in the console is not silently unclickable.
+func checkPack(dir string, strict bool) {
+	clean := filepath.Clean(dir)
+	id := filepath.Base(clean)
+	manifest, err := petpack.ReadManifest(clean, id)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if strict {
+		if len(manifest.Hotzones) == 0 {
+			log.Fatalf("petpack %q: strict check requires at least one hotzone", id)
+		}
+		if len(manifest.Presets) == 0 {
+			log.Fatalf("petpack %q: strict check requires at least one preset", id)
+		}
+	}
+	pack, err := petpack.LoadDir(clean, id, 1)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var frames int
+	for _, clip := range pack.Clips {
+		frames += clip.FrameCount()
+	}
+	fmt.Printf("pack=%s schema=%d clips=%d frames=%d hotzones=%d presets=%d\n",
+		pack.Manifest.ID, pack.Manifest.Schema, len(pack.Clips), frames,
+		len(pack.Manifest.Hotzones), len(pack.Manifest.Presets))
 }

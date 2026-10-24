@@ -16,6 +16,7 @@ import (
 // Pages of the main window, also used as sidebar item IDs.
 const (
 	PageOverview = "overview"
+	PagePacks    = "packs"
 	PageAbout    = "about"
 )
 
@@ -47,6 +48,28 @@ type Config struct {
 	// OpenDataDir opens the data root in the system file manager. Nil hides
 	// the action.
 	OpenDataDir func() error
+	// LoadPacks lists installed asset packs. Nil hides the pack page
+	// controls that depend on it.
+	LoadPacks func() ([]PackSummary, error)
+	// ChoosePackZip asks the user for a pack zip and returns its path, or ""
+	// when canceled. Nil hides the import form.
+	ChoosePackZip func() (string, error)
+	// ImportPack installs a zip. It must not activate the pack; the console
+	// calls ActivatePack after a successful import.
+	ImportPack func(zipPath string, acceptLicense bool) (PackSummary, error)
+	// ReplacePack installs a zip over an existing id. Nil hides the replace
+	// option.
+	ReplacePack func(zipPath string, acceptLicense bool) (PackSummary, error)
+	// ActivatePack switches the running pet and persists petPack.
+	ActivatePack func(id string) error
+	// DeletePack removes an inactive pack.
+	DeletePack func(id string) error
+	// ConfirmDeletePack asks before deleting. Nil means no confirmation.
+	ConfirmDeletePack func(id, name string) bool
+	// LoadPackPreview returns a PNG poster for a pack.
+	LoadPackPreview func(id string) ([]byte, error)
+	// OpenPacksDir opens the install directory.
+	OpenPacksDir func() error
 	// RepositoryURL is the public repository opened from the About page.
 	RepositoryURL string
 	// UpdateSource names the release feed, such as "LoTwT/lucia".
@@ -71,6 +94,22 @@ type Model struct {
 	bubbleChoice string
 	// petScaleChoice is the label selected in the pet size control.
 	petScaleChoice string
+	// Pack management state. Packs are refreshed explicitly so the view
+	// never scans the filesystem on every frame.
+	packs          []PackSummary
+	packsLoaded    bool
+	packsErr       string
+	packSelected   string
+	packZip        string
+	packLicense    bool
+	packReplace    bool
+	packPreview    *ui.Bitmap
+	packPreviewID  string
+	packPreviewW   int
+	packPreviewH   int
+	packPreviewErr string
+	packActionErr  string
+	packNotice     string
 }
 
 // New creates the window model on the overview page.
@@ -100,6 +139,8 @@ func (m *Model) View(c *ui.Context) {
 			ui.Scroll(c).Grow(1).Padding(24, 32, 32).Gap(18).Children(func() {
 				ui.Column(c).MaxWidth(820).Gap(18).Children(func() {
 					switch m.page {
+					case PagePacks:
+						m.packsPage(c)
 					case PageAbout:
 						m.aboutPage(c)
 					default:
@@ -170,6 +211,7 @@ func (m *Model) sidebar(c *ui.Context) {
 		ui.Sidebar(c, &m.page, func() {
 			ui.SidebarSection(c, "应用", nil, func() {
 				ui.SidebarItem(c, PageOverview, petIcon, "桌宠")
+				ui.SidebarItem(c, PagePacks, packIcon, "素材包")
 				ui.SidebarItem(c, PageAbout, aboutIcon, "关于").Children(func() {
 					if phase := m.cfg.Updates.Snapshot().Phase; phase == updates.PhaseAvailable {
 						ui.Badge(c, "新")
@@ -210,6 +252,8 @@ func (m *Model) logoMark(c *ui.Context, size float32) {
 
 func (m *Model) pageHeading() (title, subtitle string) {
 	switch m.page {
+	case PagePacks:
+		return "素材包", "导入、预览与管理本地动画素材"
 	case PageAbout:
 		return "关于", "版本、更新与数据位置"
 	default:

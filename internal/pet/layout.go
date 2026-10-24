@@ -128,6 +128,23 @@ func (m *Model) applyLayout() {
 		W: 1,
 		H: max(1, float32(windowHeight)-anchorY),
 	}
+	m.layoutHotzones()
+}
+
+func (m *Model) layoutHotzones() {
+	m.hotzones = m.hotzones[:0]
+	for _, entry := range m.hotzoneEntries {
+		rect := entry.Rect
+		m.hotzones = append(m.hotzones, Hotzone{
+			ID: entry.ID, Label: entry.Label, Preset: entry.Preset, Action: entry.Action,
+			Rect: ui.Rect{
+				X: m.imageRect.X + float32(rect.X*float64(m.imageRect.W)),
+				Y: m.imageRect.Y + float32(rect.Y*float64(m.imageRect.H)),
+				W: float32(rect.Width * float64(m.imageRect.W)),
+				H: float32(rect.Height * float64(m.imageRect.H)),
+			},
+		})
+	}
 }
 
 // SetScale changes the window and sprite scale. It clamps invalid values so a
@@ -154,8 +171,23 @@ func (m *Model) WindowSize() (width, height int) { return m.windowWidth, m.windo
 // SpriteSize returns the edge lengths of the drawn sprite in DIPs.
 func (m *Model) SpriteSize() (width, height int) { return m.spriteWidth, m.spriteHeight }
 
-// FaceRegion returns the clickable face rectangle in window DIPs.
+// FaceRegion returns the clickable face rectangle in window DIPs. It is kept
+// for callers that predate named hotzones; new code should use Hotzones.
 func (m *Model) FaceRegion() ui.Rect { return m.faceRegion }
+
+// Hotzones returns the clickable regions in window DIPs. The static pet has
+// one legacy face zone so both artwork paths use the same click wiring.
+func (m *Model) Hotzones() []Hotzone {
+	if len(m.hotzones) > 0 {
+		return append([]Hotzone(nil), m.hotzones...)
+	}
+	if m.faceRegion.W <= 0 || m.faceRegion.H <= 0 {
+		return nil
+	}
+	return []Hotzone{{
+		ID: "face", Label: "摸摸脸", Preset: "tap", Rect: m.faceRegion,
+	}}
+}
 
 // ImageRect returns the drawn artwork rectangle in window DIPs. The sprite
 // box may be larger when the artwork has a different aspect ratio.
