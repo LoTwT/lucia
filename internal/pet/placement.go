@@ -8,9 +8,12 @@ type Rect struct {
 
 // Display is the geometry the placement rules need from a monitor. Bounds is
 // the whole display; WorkArea excludes the menu bar, Dock and taskbars.
+// ScaleFactor is available to callers that rebuild animation caches when the
+// pet moves between displays.
 type Display struct {
-	Bounds   Rect
-	WorkArea Rect
+	Bounds      Rect
+	WorkArea    Rect
+	ScaleFactor float64
 }
 
 // KeepOnScreen returns the window position to use after a move. A window

@@ -15,6 +15,7 @@ import (
 	"github.com/LoTwT/lucia/internal/buildinfo"
 	"github.com/LoTwT/lucia/internal/diagnostics"
 	"github.com/LoTwT/lucia/internal/pet"
+	"github.com/LoTwT/lucia/internal/petpack"
 	"github.com/LoTwT/lucia/internal/settings"
 	appui "github.com/LoTwT/lucia/internal/ui"
 	"github.com/LoTwT/lucia/internal/updates"
@@ -81,12 +82,13 @@ func main() {
 	manager := updates.New(updates.MyGo{}, info.Version)
 	manager.SetAutoCheck(prefs.CheckUpdatesOnLaunch)
 
-	petModel, err := pet.New()
+	petModel, err := newPetModel(paths.Data, prefs.PetPack)
 	if err != nil {
 		log.Fatalf("lucia: pet assets: %v", err)
 	}
 	petModel.SetScale(prefs.PetScale)
 	prefs.PetScale = petModel.Scale()
+	playIntro := prefs.PetVisible && petModel.Animated() && !prefs.PetIntroPlayed
 
 	var (
 		win        *mygo.Window
@@ -95,6 +97,7 @@ func main() {
 		tray       *mygo.Tray
 		quitting   bool
 		lastBubble time.Time
+		lastPhase  updates.Phase
 	)
 	petSound := newPetSound()
 	model := appui.New(appui.Config{
@@ -157,6 +160,7 @@ func main() {
 		}
 		bubbleWin.Hide()
 		petWin.ResetPosition()
+		petModel.PlayAction("wave")
 		syncPetVisible(true)
 	}
 
@@ -214,6 +218,15 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		petWin = newPetWindow(petModel, func() bool { return quitting }, prefs.PetVisible)
+		if playIntro {
+			petWin.SetOnFirstFrame(func() {
+				prefs.PetIntroPlayed = true
+				if err := settings.Save(paths.Data, prefs); err != nil {
+					log.Printf("lucia: save pet intro state: %v", err)
+				}
+			})
+			petModel.PlayAction("wave")
+		}
 		bubbleWin = newBubbleWindow(func() bool { return quitting })
 		petWin.SetOnMove(func() { bubbleWin.Hide() })
 		petWin.SetOnHide(func() {
@@ -245,7 +258,7 @@ func main() {
 				return
 			}
 			lastBubble = now
-			bubbleWin.Show(reaction, petWin.Rect(), currentPetDisplays())
+			bubbleWin.Show(reaction, petWin.BubbleRect(), currentPetDisplays())
 		})
 
 		win = mygo.NewWindow(mygo.WindowOptions{
@@ -293,8 +306,23 @@ func main() {
 		// Background state changes redraw the window; Update runs the
 		// closure on the UI thread and is safe from the manager's goroutines.
 		manager.SetNotify(func() {
+			snapshot := manager.Snapshot()
 			if win != nil && !win.IsDestroyed() {
-				win.Update(func() {})
+				win.Update(func() {
+					if snapshot.Phase == lastPhase {
+						return
+					}
+					lastPhase = snapshot.Phase
+					if petWin == nil || !petWin.IsVisible() {
+						return
+					}
+					switch snapshot.Phase {
+					case updates.PhaseChecking, updates.PhaseDownloading:
+						petModel.PlayBackgroundAction("think")
+					case updates.PhaseFailed:
+						petModel.PlayBackgroundAction("sad")
+					}
+				})
 			}
 		})
 		manager.SetInstalled(func() {
@@ -314,6 +342,27 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("lucia: exited")
+}
+
+// newPetModel loads the configured external pack, falling back to the
+// embedded whale when the pack is missing or invalid. A broken optional pack
+// must never keep the app from starting.
+func newPetModel(dataDir, packID string) (*pet.Model, error) {
+	if packID != "" {
+		pack, err := petpack.Load(dataDir, packID, 2)
+		if err != nil {
+			log.Printf("lucia: pet pack %q: %v (using the built-in pet)", packID, err)
+		} else {
+			model, err := pet.NewAnimated(pack)
+			if err != nil {
+				log.Printf("lucia: pet pack %q: %v (using the built-in pet)", packID, err)
+			} else {
+				log.Printf("lucia: pet pack %q loaded: %d clips", packID, len(pack.Clips))
+				return model, nil
+			}
+		}
+	}
+	return pet.New()
 }
 
 // selfTest reports the identity and updater state of the built artifact.

@@ -11,6 +11,9 @@ mygo_windows_*.syso
 mygo-update.key
 mygo-update.pub
 
+# Local-only animated pet pack input; never distributed with Lucia.
+/naiwa.zip
+
 # OS
 .DS_Store
 

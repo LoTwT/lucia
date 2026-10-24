@@ -27,6 +27,9 @@ func TestLoadMissingUsesDefaults(t *testing.T) {
 	if got.PetScale != 1 {
 		t.Errorf("pet scale = %v, want 1", got.PetScale)
 	}
+	if got.PetPack != "" || got.PetIntroPlayed {
+		t.Errorf("pet pack defaults = %q, intro %v; want empty, false", got.PetPack, got.PetIntroPlayed)
+	}
 }
 
 func TestLoadMergesNewFieldsWithDefaults(t *testing.T) {
@@ -74,6 +77,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	want.SoundEnabled = true
 	want.BubbleCooldownSeconds = 30
 	want.PetScale = 1.25
+	want.PetPack = "naiwa"
+	want.PetIntroPlayed = true
 	if err := Save(dir, want); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
