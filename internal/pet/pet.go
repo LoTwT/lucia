@@ -238,7 +238,7 @@ func (m *Model) View(c *ui.Context) {
 			return
 		}
 		menu.Separator()
-		if m.menuActions.OpenSettings != nil && menu.Item("桌宠设置…").Chosen() {
+		if m.menuActions.OpenSettings != nil && menu.Item("桌宠设置").Chosen() {
 			m.menuActions.OpenSettings()
 		}
 		if m.menuActions.Hide != nil && menu.Item("隐藏宠物").Chosen() {

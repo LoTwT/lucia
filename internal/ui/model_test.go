@@ -31,8 +31,6 @@ func newTestModel(t *testing.T, src updates.Source) (*Model, *updates.Manager) {
 	saved := 0
 	model := New(Config{
 		Version:       "0.0.1",
-		Commit:        "0123456789ab",
-		Platform:      "darwin/arm64",
 		DataDir:       "/Users/ada/Library/Application Support/Lucia",
 		Updates:       manager,
 		Settings:      settings.Default(),
@@ -44,12 +42,20 @@ func newTestModel(t *testing.T, src updates.Source) (*Model, *updates.Manager) {
 	return model, manager
 }
 
-func TestOverviewShowsBuildIdentity(t *testing.T) {
+func TestAboutShowsVersionWithoutBuildDetails(t *testing.T) {
 	model, _ := newTestModel(t, fakeSource{})
 	tt := ui.NewTester(model.View, 1000, 700)
-	for _, want := range []string{"Lucia", "v0.0.1", "运行信息", "0123456789ab", "darwin/arm64"} {
+	if err := tt.Click("关于"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Lucia", "v0.0.1", "版本、更新与数据位置", "检查更新"} {
 		if !tt.HasText(want) {
-			t.Errorf("overview does not show %q; texts: %v", want, tt.Texts())
+			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
+		}
+	}
+	for _, unwanted := range []string{"0123456789ab", "darwin/arm64", "com.lotwt.lucia"} {
+		if tt.HasText(unwanted) {
+			t.Errorf("about page still shows build detail %q; texts: %v", unwanted, tt.Texts())
 		}
 	}
 }
@@ -57,8 +63,6 @@ func TestOverviewShowsBuildIdentity(t *testing.T) {
 func TestOverviewShowsPetControls(t *testing.T) {
 	model := New(Config{
 		Version:          "0.0.1",
-		Commit:           "0123456789ab",
-		Platform:         "darwin/arm64",
 		DataDir:          "/tmp/lucia",
 		Updates:          updates.New(disabledSource{}, "0.0.1"),
 		Settings:         settings.Default(),
@@ -67,10 +71,58 @@ func TestOverviewShowsPetControls(t *testing.T) {
 		ResetPetPosition: func() {},
 	})
 	tt := ui.NewTester(model.View, 1000, 700)
-	for _, want := range []string{"桌宠", "显示桌宠", "桌宠大小", "互动音效", "气泡频率", "开机自启", "重置桌宠位置"} {
+	for _, want := range []string{
+		"桌宠",
+		"显示桌宠",
+		"隐藏后可从托盘重新显示；重启后保持当前选择。",
+		"桌宠大小",
+		"互动音效",
+		"摸脸和摸摸头时播放一小段提示音。",
+		"气泡频率",
+		"开机自启",
+		"桌宠位置",
+		"移回主屏右下角；隐藏时会重新显示。",
+		"重置",
+	} {
 		if !tt.HasText(want) {
-			t.Errorf("overview does not show %q; texts: %v", want, tt.Texts())
+			t.Errorf("pet page does not show %q; texts: %v", want, tt.Texts())
 		}
+	}
+	if tt.HasText("运行信息") {
+		t.Errorf("pet page still shows the duplicate runtime card; texts: %v", tt.Texts())
+	}
+}
+
+func TestResetPetPositionRow(t *testing.T) {
+	reset := false
+	prefs := settings.Default()
+	prefs.PetVisible = false
+	model := New(Config{
+		Version:          "0.0.1",
+		DataDir:          "/tmp/lucia",
+		Updates:          updates.New(disabledSource{}, "0.0.1"),
+		Settings:         prefs,
+		ResetPetPosition: func() { reset = true },
+	})
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("重置"); err != nil {
+		t.Fatal(err)
+	}
+	if !reset || !model.settings.PetVisible {
+		t.Fatalf("reset=%v visible=%v, want true/true", reset, model.settings.PetVisible)
+	}
+}
+
+func TestPhaseDetailDeduplicatesUpdateStatus(t *testing.T) {
+	if got := phaseDetail(updates.Snapshot{Phase: updates.PhaseUpToDate}); got != "" {
+		t.Fatalf("up-to-date detail = %q, want empty", got)
+	}
+	got := phaseDetail(updates.Snapshot{
+		Phase:   updates.PhaseAvailable,
+		Release: &updates.Release{Version: "0.2.0"},
+	})
+	if got != "安装后会自动重启进入新版本。" {
+		t.Fatalf("available detail = %q", got)
 	}
 }
 
@@ -164,28 +216,36 @@ func TestRefreshOpenAtLogin(t *testing.T) {
 	}
 }
 
-func TestSidebarNavigatesToUpdatesAndAbout(t *testing.T) {
+func TestSidebarNavigatesBetweenPetAndAbout(t *testing.T) {
 	model, _ := newTestModel(t, fakeSource{})
 	tt := ui.NewTester(model.View, 1000, 700)
-	if err := tt.Click("更新"); err != nil {
-		t.Fatal(err)
-	}
-	if model.page != PageUpdates {
-		t.Fatalf("page %q, want updates", model.page)
-	}
-	if !tt.HasText("检查更新") || !tt.HasText("启动时自动检查更新") {
-		t.Errorf("updates page is missing its controls; texts: %v", tt.Texts())
-	}
 	if err := tt.Click("关于"); err != nil {
 		t.Fatal(err)
 	}
 	if model.page != PageAbout {
 		t.Fatalf("page %q, want about", model.page)
 	}
-	for _, want := range []string{"com.lotwt.lucia", "MyGo 文档", "LoTwT/lucia"} {
+	for _, want := range []string{"检查更新", "启动时自动检查更新", "LoTwT/lucia", "源码与发布记录"} {
 		if !tt.HasText(want) {
 			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
 		}
+	}
+	if err := tt.Click("桌宠"); err != nil {
+		t.Fatal(err)
+	}
+	if model.page != PageOverview {
+		t.Fatalf("page %q, want overview", model.page)
+	}
+	if !tt.HasText("显示桌宠") {
+		t.Fatalf("pet page does not show pet settings; texts: %v", tt.Texts())
+	}
+}
+
+func TestShowUpdatesOpensAbout(t *testing.T) {
+	model, _ := newTestModel(t, fakeSource{})
+	model.ShowUpdates()
+	if model.page != PageAbout {
+		t.Fatalf("page %q, want about", model.page)
 	}
 }
 
@@ -202,6 +262,23 @@ func TestShowOverviewReturnsToPetSettings(t *testing.T) {
 	}
 }
 
+func TestUpToDateShowsLastCheckedOnce(t *testing.T) {
+	model, manager := newTestModel(t, fakeSource{})
+	if err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("关于"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("已是最新版本") || !tt.HasText("上次检查：") {
+		t.Errorf("about page is missing the up-to-date status or last check; texts: %v", tt.Texts())
+	}
+	if tt.HasText("当前版本已是最新，上次检查于") {
+		t.Errorf("about page duplicated the last-check detail; texts: %v", tt.Texts())
+	}
+}
+
 func TestAvailableUpdateShowsNotesAndInstall(t *testing.T) {
 	date := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	src := fakeSource{release: &updates.Release{
@@ -214,31 +291,59 @@ func TestAvailableUpdateShowsNotesAndInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt := ui.NewTester(model.View, 1000, 700)
-	if err := tt.Click("更新"); err != nil {
+	if err := tt.Click("关于"); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"发现新版本 0.2.0", "安装并重启", "新功能", "更快的启动"} {
+	for _, want := range []string{"发现新版本 0.2.0", "安装后会自动重启进入新版本。", "安装并重启", "新功能", "更快的启动"} {
 		if !tt.HasText(want) {
-			t.Errorf("updates page does not show %q; texts: %v", want, tt.Texts())
+			t.Errorf("about page does not show %q; texts: %v", want, tt.Texts())
 		}
+	}
+	if tt.HasText("新版本 0.2.0 已就绪") {
+		t.Errorf("about page duplicated the release version; texts: %v", tt.Texts())
 	}
 }
 
 func TestDisabledBuildExplainsUpdates(t *testing.T) {
 	model := New(Config{
-		Version:  "0.0.1",
-		Commit:   "unknown",
-		Platform: "darwin/arm64",
-		DataDir:  "/tmp/lucia",
-		Updates:  updates.New(disabledSource{}, "0.0.1"),
-		Settings: settings.Default(),
+		Version:      "0.0.1",
+		DataDir:      "/tmp/lucia",
+		Updates:      updates.New(disabledSource{}, "0.0.1"),
+		Settings:     settings.Default(),
+		UpdateSource: "LoTwT/lucia",
 	})
 	tt := ui.NewTester(model.View, 1000, 700)
-	if err := tt.Click("更新"); err != nil {
+	if err := tt.Click("关于"); err != nil {
 		t.Fatal(err)
 	}
 	if !tt.HasText("当前构建未启用自动更新") {
-		t.Errorf("updates page does not explain the disabled build; texts: %v", tt.Texts())
+		t.Errorf("about page does not explain the disabled build; texts: %v", tt.Texts())
+	}
+	if tt.HasText("LoTwT/lucia") {
+		t.Errorf("disabled build still shows the update source; texts: %v", tt.Texts())
+	}
+	if tt.HasText("启动时自动检查更新") {
+		t.Errorf("disabled build still shows the auto-check control; texts: %v", tt.Texts())
+	}
+}
+
+func TestManualCheckAvailableWhenAutoCheckDisabled(t *testing.T) {
+	prefs := settings.Default()
+	prefs.CheckUpdatesOnLaunch = false
+	model := New(Config{
+		Version:  "0.0.1",
+		DataDir:  "/tmp/lucia",
+		Updates:  updates.New(fakeSource{}, "0.0.1"),
+		Settings: prefs,
+	})
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("关于"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"检查更新", "启动时自动检查更新"} {
+		if !tt.HasText(want) {
+			t.Errorf("about page does not show %q with auto-check disabled; texts: %v", want, tt.Texts())
+		}
 	}
 }
 

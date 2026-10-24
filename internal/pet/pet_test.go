@@ -506,7 +506,7 @@ func TestContextMenuApplicationActions(t *testing.T) {
 
 	tt.RightClickAt(124, 200)
 	items := tt.Menu()
-	for _, want := range []string{"摸摸头", "-", "桌宠设置…", "隐藏宠物", "重置位置"} {
+	for _, want := range []string{"摸摸头", "-", "桌宠设置", "隐藏宠物", "重置位置"} {
 		found := false
 		for _, item := range items {
 			if item == want {
@@ -520,7 +520,7 @@ func TestContextMenuApplicationActions(t *testing.T) {
 	}
 	tt.CloseMenu()
 
-	for _, label := range []string{"桌宠设置…", "隐藏宠物", "重置位置"} {
+	for _, label := range []string{"桌宠设置", "隐藏宠物", "重置位置"} {
 		tt.RightClickAt(124, 200)
 		if err := tt.ChooseMenuItem(label); err != nil {
 			t.Fatal(err)

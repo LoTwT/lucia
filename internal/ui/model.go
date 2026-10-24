@@ -16,7 +16,6 @@ import (
 // Pages of the main window, also used as sidebar item IDs.
 const (
 	PageOverview = "overview"
-	PageUpdates  = "updates"
 	PageAbout    = "about"
 )
 
@@ -24,10 +23,6 @@ const (
 type Config struct {
 	// Version is the running application version.
 	Version string
-	// Commit is the short source revision, or "unknown".
-	Commit string
-	// Platform is GOOS/GOARCH of the running binary.
-	Platform string
 	// DataDir is the application's data root, shown in the window.
 	DataDir string
 	// Updates is the update manager the window drives. Required.
@@ -105,8 +100,6 @@ func (m *Model) View(c *ui.Context) {
 			ui.Scroll(c).Grow(1).Padding(24, 32, 32).Gap(18).Children(func() {
 				ui.Column(c).MaxWidth(820).Gap(18).Children(func() {
 					switch m.page {
-					case PageUpdates:
-						m.updatesPage(c)
 					case PageAbout:
 						m.aboutPage(c)
 					default:
@@ -158,10 +151,11 @@ func (m *Model) setOpenAtLogin(open bool) {
 	}
 }
 
-// ShowUpdates switches to the updates page and starts a check when there is
-// no current result to show. The application menu calls it.
+// ShowUpdates opens the about page, where the update controls live, and
+// starts a check when there is no current result to show. The application
+// menu calls it.
 func (m *Model) ShowUpdates() {
-	m.page = PageUpdates
+	m.page = PageAbout
 	switch m.cfg.Updates.Snapshot().Phase {
 	case updates.PhaseIdle, updates.PhaseUpToDate, updates.PhaseFailed:
 		m.cfg.Updates.CheckAsync()
@@ -175,13 +169,12 @@ func (m *Model) sidebar(c *ui.Context) {
 		m.brand(c)
 		ui.Sidebar(c, &m.page, func() {
 			ui.SidebarSection(c, "应用", nil, func() {
-				ui.SidebarItem(c, PageOverview, overviewIcon, "概览")
-				ui.SidebarItem(c, PageUpdates, updatesIcon, "更新").Children(func() {
+				ui.SidebarItem(c, PageOverview, petIcon, "桌宠")
+				ui.SidebarItem(c, PageAbout, aboutIcon, "关于").Children(func() {
 					if phase := m.cfg.Updates.Snapshot().Phase; phase == updates.PhaseAvailable {
 						ui.Badge(c, "新")
 					}
 				})
-				ui.SidebarItem(c, PageAbout, aboutIcon, "关于")
 			})
 		}).Grow(1).Label("页面")
 		ui.Textf(c, "v%s", m.cfg.Version).FontSize(11).TextColor(t.TextMuted).Padding(10, 16)
@@ -194,7 +187,7 @@ func (m *Model) brand(c *ui.Context) {
 		m.logoMark(c, 34)
 		ui.Column(c).Gap(0).Children(func() {
 			ui.Text(c, "Lucia").FontSize(16).Bold()
-			ui.Text(c, "MyGo 原生应用").FontSize(11).TextColor(t.TextMuted)
+			ui.Text(c, "桌面宠物").FontSize(11).TextColor(t.TextMuted)
 		})
 	})
 }
@@ -217,22 +210,15 @@ func (m *Model) logoMark(c *ui.Context, size float32) {
 
 func (m *Model) pageHeading() (title, subtitle string) {
 	switch m.page {
-	case PageUpdates:
-		return "更新", "检查签名更新，安装后自动重启进入新版本"
 	case PageAbout:
-		return "关于", "构建信息、数据位置与项目入口"
+		return "关于", "版本、更新与数据位置"
 	default:
-		return "概览", "Lucia 的运行状态与常用操作"
+		return "桌宠", "设置桌宠的显示方式、声音与互动行为"
 	}
 }
 
 func (m *Model) overviewPage(c *ui.Context) {
-	m.hero(c)
 	m.petCard(c)
-	ui.Row(c).Gap(16).AlignItems(ui.Stretch).Children(func() {
-		m.statusCard(c)
-		m.updateSummaryCard(c)
-	})
 }
 
 var petScaleChoices = []string{"小（0.8×）", "标准（1.0×）", "大（1.25×）", "特大（1.5×）"}
@@ -303,11 +289,11 @@ func (m *Model) SetPetVisible(visible bool) {
 
 func (m *Model) petCard(c *ui.Context) {
 	t := c.Theme()
-	panel(c, "桌宠", func() {
+	panel(c, "", func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
 			ui.Column(c).Gap(2).Grow(1).Children(func() {
 				ui.Text(c, "显示桌宠").FontSize(14)
-				ui.Text(c, "隐藏后仍可从托盘重新显示；该状态会保留到下次启动。").FontSize(12).
+				ui.Text(c, "隐藏后可从托盘重新显示；重启后保持当前选择。").FontSize(12).
 					TextColor(t.TextMuted)
 			})
 			ui.Switch(c, &m.settings.PetVisible).Label("显示桌宠").OnChange(func() {
@@ -336,7 +322,7 @@ func (m *Model) petCard(c *ui.Context) {
 		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
 			ui.Column(c).Gap(2).Grow(1).Children(func() {
 				ui.Text(c, "互动音效").FontSize(14)
-				ui.Text(c, "摸脸和摸摸头时播放一段轻短的提示音，默认关闭。").FontSize(12).
+				ui.Text(c, "摸脸和摸摸头时播放一小段提示音。").FontSize(12).
 					TextColor(t.TextMuted)
 			})
 			ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(m.saveSettings)
@@ -371,92 +357,20 @@ func (m *Model) petCard(c *ui.Context) {
 		}
 
 		if m.cfg.ResetPetPosition != nil {
-			if ui.Button(c, "重置桌宠位置").Clicked() {
-				m.settings.PetVisible = true
-				m.saveSettings()
-				m.cfg.ResetPetPosition()
-			}
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "桌宠位置").FontSize(14)
+					ui.Text(c, "移回主屏右下角；隐藏时会重新显示。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				if ui.Button(c, "重置").Clicked() {
+					m.settings.PetVisible = true
+					m.saveSettings()
+					m.cfg.ResetPetPosition()
+				}
+			})
 		}
 	})
-}
-
-func (m *Model) hero(c *ui.Context) {
-	ui.Column(c).Padding(26).Gap(14).Radius(14).
-		LinearGradient(ui.LinearGradient{
-			From:  ui.Hex("#1e1b4b"),
-			To:    ui.Hex("#4c1d95"),
-			Angle: 125,
-		}).Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(16).Children(func() {
-			m.logoMark(c, 58)
-			ui.Column(c).Gap(3).Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-					ui.Text(c, "Lucia").FontSize(28).Bold().TextColor(ui.Hex("#faf5ff"))
-					ui.Badge(c, "v"+m.cfg.Version).Background(ui.RGBA(255, 255, 255, 0.16)).
-						TextColor(ui.Hex("#faf5ff"))
-				})
-				ui.Text(c, "轻量、原生的 MyGo 桌面应用").FontSize(14).
-					TextColor(ui.RGBA(250, 245, 255, 0.72))
-			})
-		})
-		ui.Text(c, "界面由 MyGo 原生绘制，无需 WebView；更新由内置的签名校验链路从 GitHub Releases 获取。").
-			FontSize(13).TextColor(ui.RGBA(250, 245, 255, 0.78)).MaxWidth(620)
-	})
-}
-
-func (m *Model) statusCard(c *ui.Context) {
-	card(c, "运行信息", func() {
-		m.infoRow(c, "版本", "v"+m.cfg.Version)
-		m.infoRow(c, "构建", m.cfg.Commit)
-		m.infoRow(c, "平台", m.cfg.Platform)
-		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			ui.Text(c, "数据").FontSize(12).TextColor(c.Theme().TextMuted).Width(52)
-			ui.Text(c, m.cfg.DataDir).FontSize(12).Grow(1).SingleLine().Selectable().
-				Tooltip(m.cfg.DataDir)
-			if m.cfg.OpenDataDir != nil {
-				if ui.Button(c, "").Label("打开数据目录").Tooltip("打开数据目录").
-					Children(func() { ui.Icon(c, folderIcon) }).Clicked() {
-					if err := m.cfg.OpenDataDir(); err != nil {
-						m.actionErr = fmt.Sprintf("打开数据目录失败：%v", err)
-					} else {
-						m.actionErr = ""
-					}
-				}
-			}
-		})
-	})
-}
-
-func (m *Model) updateSummaryCard(c *ui.Context) {
-	t := c.Theme()
-	snap := m.cfg.Updates.Snapshot()
-	card(c, "更新", func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			statusDot(c, phaseColor(t, snap.Phase))
-			ui.Text(c, phaseTitle(snap)).FontSize(14).Bold()
-		})
-		ui.Text(c, phaseDetail(snap)).FontSize(12).TextColor(t.TextMuted)
-		ui.Row(c).Gap(8).Children(func() {
-			if ui.Button(c, "").Children(func() {
-				ui.Icon(c, arrowIcon)
-				ui.Text(c, "打开更新")
-			}).Clicked() {
-				m.page = PageUpdates
-			}
-		})
-	})
-}
-
-func (m *Model) infoRow(c *ui.Context, label, value string) {
-	ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-		ui.Text(c, label).FontSize(12).TextColor(c.Theme().TextMuted).Width(52)
-		ui.Text(c, value).FontSize(12).Grow(1).Selectable()
-	})
-}
-
-// card draws a titled surface that shares a row with another card.
-func card(c *ui.Context, title string, body func()) ui.Element {
-	return panelElement(c, title, body).Grow(1).Basis(0)
 }
 
 // panel draws a titled surface across the content column.
@@ -522,21 +436,15 @@ func phaseTitle(s updates.Snapshot) string {
 func phaseDetail(s updates.Snapshot) string {
 	switch s.Phase {
 	case updates.PhaseUnavailable:
-		return "开发运行、未配置更新源或安装位置不可写时不会检查更新；正式安装版会启用。"
+		return "开发运行、未配置更新源或安装位置不可写时不会检查更新。"
 	case updates.PhaseIdle:
 		return "点击“检查更新”读取 GitHub Releases 中的签名更新。"
 	case updates.PhaseChecking:
 		return "正在读取更新清单并比较版本。"
 	case updates.PhaseUpToDate:
-		if s.LastChecked.IsZero() {
-			return "当前版本已是最新。"
-		}
-		return "当前版本已是最新，上次检查于 " + s.LastChecked.Local().Format("15:04") + "。"
+		return ""
 	case updates.PhaseAvailable:
-		if s.Release != nil {
-			return "新版本 " + s.Release.Version + " 已就绪，可安装并重启。"
-		}
-		return "新版本已就绪，可安装并重启。"
+		return "安装后会自动重启进入新版本。"
 	case updates.PhaseDownloading:
 		if s.Total > 0 {
 			return fmt.Sprintf("已下载 %s / %s。", formatBytes(s.Downloaded), formatBytes(s.Total))

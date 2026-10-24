@@ -99,8 +99,6 @@ func main() {
 	petSound := newPetSound()
 	model := appui.New(appui.Config{
 		Version:  info.Version,
-		Commit:   info.CommitLabel(),
-		Platform: buildinfo.Platform(),
 		DataDir:  paths.Data,
 		Updates:  manager,
 		Settings: prefs,
@@ -195,7 +193,7 @@ func main() {
 		{Role: mygo.RoleEditMenu},
 		{Role: mygo.RoleWindowMenu},
 		{Label: "帮助", Submenu: []*mygo.MenuItem{
-			{Label: "检查更新…", Accelerator: "CmdOrCtrl+U", Click: func(*mygo.MenuItem, *mygo.Window) {
+			{Label: "检查更新", Accelerator: "CmdOrCtrl+U", Click: func(*mygo.MenuItem, *mygo.Window) {
 				showWindow()
 				model.ShowUpdates()
 				if win != nil && !win.IsDestroyed() {
