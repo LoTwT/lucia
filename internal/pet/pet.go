@@ -91,9 +91,15 @@ type Model struct {
 	frames          [3]*ui.Bitmap
 	layout          assetLayout
 	scale           float64
-	windowSize      int
-	spriteSize      int
+	windowWidth     int
+	windowHeight    int
+	spriteWidth     int
+	spriteHeight    int
+	imageRect       ui.Rect
 	faceRegion      ui.Rect
+	bubbleAnchorX   float64
+	bubbleAnchorY   float64
+	bubbleRect      ui.Rect
 	start           time.Time
 	lastInteraction time.Time
 	interacted      bool
@@ -104,6 +110,7 @@ type Model struct {
 	onReaction      func(Reaction)
 	onInvalidate    func()
 	menuActions     MenuActions
+	animated        *animatedModel
 }
 
 // MenuActions are the application-level actions offered by the pet's
@@ -122,7 +129,7 @@ func New() (*Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load pet layout: %w", err)
 	}
-	m := &Model{layout: layout, scale: defaultScale}
+	m := &Model{layout: layout, scale: defaultScale, bubbleAnchorX: 0.5}
 	for i, data := range [][]byte{idleOpenPNG, idleHalfClosedPNG, idleClosedPNG} {
 		bitmap, err := ui.DecodeBitmap(data)
 		if err != nil {
@@ -174,9 +181,36 @@ func (m *Model) React(reaction Reaction) {
 	m.reaction = reaction
 	m.tapReady = true
 	m.interacted = true
+	if m.animated != nil {
+		m.animated.requestReaction(reaction)
+	}
 	if m.onReaction != nil {
 		m.onReaction(reaction)
 	}
+	m.invalidate()
+}
+
+// Animated reports whether the model is backed by an imported animation
+// pack rather than the built-in static artwork.
+func (m *Model) Animated() bool { return m.animated != nil }
+
+// PlayAction starts a one-shot action from an imported animated pack. It is
+// a no-op for the built-in static artwork.
+func (m *Model) PlayAction(id string) {
+	if m.animated == nil || id == "" {
+		return
+	}
+	m.animated.requestAction(id)
+	m.invalidate()
+}
+
+// PlayBackgroundAction plays an update-status action without waking a
+// sleeping pet. It is a no-op for the built-in static artwork.
+func (m *Model) PlayBackgroundAction(id string) {
+	if m.animated == nil || id == "" {
+		return
+	}
+	m.animated.requestBackgroundAction(id)
 	m.invalidate()
 }
 
@@ -185,12 +219,18 @@ func (m *Model) React(reaction Reaction) {
 func (m *Model) DragStarted() {
 	m.dragging = true
 	m.interacted = true
+	if m.animated != nil {
+		m.animated.requestDragStart()
+	}
 	m.invalidate()
 }
 
 func (m *Model) DragEnded() {
 	m.dragging = false
 	m.interacted = true
+	if m.animated != nil {
+		m.animated.requestDragEnd()
+	}
 	m.invalidate()
 }
 
@@ -226,6 +266,9 @@ func (m *Model) View(c *ui.Context) {
 	reactionElapsed := now.Sub(m.tapAt)
 	reduceMotion := c.Preferences().ReduceMotion
 	bob, squash, lift := motionFor(reduceMotion, elapsed, m.reaction, reactionElapsed)
+	if m.animated != nil {
+		m.animated.sync(now, activity, idle, m.dragging, m.reaction, m.tapAt, reduceMotion)
+	}
 
 	c.Root().Background(ui.Transparent)
 
@@ -233,6 +276,17 @@ func (m *Model) View(c *ui.Context) {
 	outer.ContextMenu(func(menu *ui.Menu) {
 		if menu.Item("摸摸头").Chosen() {
 			m.React(ReactionHeadPat)
+		}
+		if m.animated != nil && m.animated.canPlayActions() {
+			if actions := m.animated.onceActions(); len(actions) > 0 {
+				menu.Separator()
+				for _, action := range actions {
+					if menu.Item(action.Label).Chosen() {
+						m.animated.requestAction(action.ID)
+						m.invalidate()
+					}
+				}
+			}
 		}
 		if m.menuActions.OpenSettings == nil && m.menuActions.Hide == nil && m.menuActions.Reset == nil {
 			return
@@ -249,29 +303,46 @@ func (m *Model) View(c *ui.Context) {
 		}
 	})
 	outer.Children(func() {
-		ui.Row(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-			image := ui.Image(c, m.frames[displayFrame(activity, elapsed, m.reaction, reactionElapsed, reduceMotion)]).
-				Size(float32(m.spriteSize), float32(m.spriteSize)).
-				Fit(ui.Contain).
-				Label("Lucia 桌宠").
-				TransformOrigin(0.5, 1)
-			if squash > 0 {
-				// Keep the feet in place while the body squashes.
-				image.Scale(1+squash*0.5, 1-squash)
-			}
-			image.Translate(0, bob+lift)
-		})
-		ui.Box(c).Absolute().
-			Left(m.faceRegion.X).Top(m.faceRegion.Y).
-			Size(m.faceRegion.W, m.faceRegion.H).
-			Label("摸摸脸").
-			Cursor(ui.CursorPointer).
-			OnClick(func() { m.React(ReactionFace) })
+		if m.animated != nil {
+			ui.Row(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+				ui.Image(c, m.animated.bitmapFor(
+					m.animated.imageFor(now, activity, m.dragging, m.reaction, m.tapAt, reduceMotion),
+				)).
+					Size(float32(m.spriteWidth), float32(m.spriteHeight)).
+					Fit(ui.Contain).
+					Label("Lucia 桌宠")
+			})
+		} else {
+			ui.Row(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+				image := ui.Image(c, m.frames[displayFrame(activity, elapsed, m.reaction, reactionElapsed, reduceMotion)]).
+					Size(float32(m.spriteWidth), float32(m.spriteHeight)).
+					Fit(ui.Contain).
+					Label("Lucia 桌宠").
+					TransformOrigin(0.5, 1)
+				if squash > 0 {
+					// Keep the feet in place while the body squashes.
+					image.Scale(1+squash*0.5, 1-squash)
+				}
+				image.Translate(0, bob+lift)
+			})
+		}
+		if m.animated == nil || m.animated.faceClickable(m.dragging) {
+			ui.Box(c).Absolute().
+				Left(m.faceRegion.X).Top(m.faceRegion.Y).
+				Size(m.faceRegion.W, m.faceRegion.H).
+				Label("摸摸脸").
+				Cursor(ui.CursorPointer).
+				OnClick(func() { m.React(ReactionFace) })
+		}
 	})
 
 	// Ask only for the frames this state needs. The view clock still derives
 	// every pose, so there is no ticker or background goroutine.
-	if delay := nextFrameDelay(activity, idle, elapsed, reactionElapsed, m.reaction, reduceMotion); delay > 0 {
+	if m.animated != nil {
+		if delay := m.animated.nextDelay(now, activity, idle, m.tapAt, reduceMotion); delay > 0 {
+			c.After(delay)
+		}
+	} else if delay := nextFrameDelay(activity, idle, elapsed, reactionElapsed, m.reaction, reduceMotion); delay > 0 {
 		c.After(delay)
 	}
 }

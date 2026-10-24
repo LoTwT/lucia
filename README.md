@@ -23,6 +23,18 @@ go run ./cmd/lucia
 
 开发运行与 `go run` 不嵌入更新源，关于页会说明“当前构建未启用自动更新”。
 
+## 外部动画素材包
+
+桌宠默认使用内嵌的鲸鱼静态素材。透明动画 WebP 素材包用开发工具导入到用户数据目录，**不进入仓库、CI 或安装包**：
+
+```sh
+go run ./cmd/petpack -zip naiwa.zip
+```
+
+默认自动选择最近使用的数据目录（`Lucia Dev`、`lucia` 或打包版 `Lucia`），也可以显式传 `-app`。数据目录跟随应用名：`go tool mygo dev` 是 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 是 `lucia`，打包版是 `Lucia`。导入前先退出 Lucia，导入后重新启动生效。`-force` 覆盖同名包，`-activate=false` 只导入不切换。素材包缺失或损坏时应用会回退内置鲸鱼。
+
+授权由用户本地确认；当前导入器在 manifest 中写入 `license.status = "local-only"`，不主张再分发权。
+
 ## 打包
 
 ```sh
@@ -64,7 +76,9 @@ gh secret set MYGO_UPDATER_PRIVATE_KEY < ~/.config/lucia/update-keys/mygo-update
 | `internal/settings/` | 设置读写。 |
 | `internal/apppaths/` | 各平台用户目录解析。 |
 | `internal/diagnostics/` | 文件日志与轮转。 |
-| `internal/pet/` | 桌宠模型、布局元数据、尺寸缩放、idle 动画、点击反应、气泡台词与透明视图。 |
-| `internal/pet/assets/deepseek-whale/` | 桌宠立绘与授权说明；美术素材按 CC BY-NC-SA 4.0 的条件使用，授权链未完全核实，仅限非商业使用。 |
+| `internal/pet/` | 桌宠模型、内置静态素材、外部动画外观、布局、点击反应、气泡台词与透明视图。 |
+| `internal/petpack/` | 外部动画素材包：WebP/ANMF 解码、manifest、裁剪、帧源与 zip 导入。 |
+| `cmd/petpack/` | 开发用动画素材导入工具；不随桌面应用分发。 |
+| `internal/pet/assets/deepseek-whale/` | 内置桌宠立绘与授权说明；美术素材按 CC BY-NC-SA 4.0 的条件使用，授权链未完全核实，仅限非商业使用。 |
 | `resources/` | 图标与随包分发的第三方声明。 |
 | `design/` | 图标 SVG 源文件。 |

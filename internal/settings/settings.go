@@ -32,6 +32,12 @@ type Settings struct {
 	// PetScale scales the pet window and sprite together. Invalid values are
 	// clamped by the pet model; the default is 1.0.
 	PetScale float64 `json:"petScale"`
+	// PetPack selects an imported artwork pack below the data directory's
+	// packs folder. An empty value uses the built-in whale.
+	PetPack string `json:"petPack,omitempty"`
+	// PetIntroPlayed records that the animated pack already greeted the user
+	// once. It keeps the greeting from replaying on every launch.
+	PetIntroPlayed bool `json:"petIntroPlayed,omitempty"`
 }
 
 // Default returns the preferences of a first launch.

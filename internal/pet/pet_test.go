@@ -10,6 +10,11 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func newPetTester(m *Model) *ui.Tester {
+	width, height := m.WindowSize()
+	return ui.NewTester(m.View, width, height)
+}
+
 func TestFrameAtFollowsBlink(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -38,16 +43,84 @@ func TestDefaultLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := m.Size(); got != 248 {
-		t.Fatalf("default window size = %d, want 248", got)
+	if got, gotHeight := m.WindowSize(); got != 248 || gotHeight != 248 {
+		t.Fatalf("default window size = %dx%d, want 248x248", got, gotHeight)
 	}
-	if got := m.SpriteSize(); got != 240 {
-		t.Fatalf("default sprite size = %d, want 240", got)
+	if got, gotHeight := m.SpriteSize(); got != 240 || gotHeight != 240 {
+		t.Fatalf("default sprite size = %dx%d, want 240x240", got, gotHeight)
 	}
 	face := m.FaceRegion()
 	want := ui.Rect{X: 78, Y: 112, W: 100, H: 76}
 	if face != want {
 		t.Fatalf("default face = %+v, want %+v", face, want)
+	}
+}
+
+func TestNonSquareLayout(t *testing.T) {
+	layout := assetLayout{
+		Canvas: dimension{Width: 512, Height: 640},
+		Window: dimension{Width: 248, Height: 310},
+		Sprite: dimension{Width: 240, Height: 300},
+	}
+	layout.Face.X = 0.5
+	layout.Face.Y = 0.1
+	layout.Face.Width = 0.25
+	layout.Face.Height = 0.2
+	m := &Model{layout: layout, scale: 1}
+	m.applyLayout()
+
+	if width, height := m.WindowSize(); width != 248 || height != 310 {
+		t.Fatalf("window size = %dx%d, want 248x310", width, height)
+	}
+	if width, height := m.SpriteSize(); width != 240 || height != 300 {
+		t.Fatalf("sprite size = %dx%d, want 240x300", width, height)
+	}
+	want := ui.Rect{X: 124, Y: 35, W: 60, H: 60}
+	if got := m.FaceRegion(); got != want {
+		t.Fatalf("face = %+v, want %+v", got, want)
+	}
+
+	m.SetScale(1.25)
+	if width, height := m.WindowSize(); width != 310 || height != 388 {
+		t.Fatalf("scaled window size = %dx%d, want 310x388", width, height)
+	}
+	if width, height := m.SpriteSize(); width != 300 || height != 375 {
+		t.Fatalf("scaled sprite size = %dx%d, want 300x375", width, height)
+	}
+}
+
+func TestLetterboxedLayout(t *testing.T) {
+	layout := assetLayout{
+		Canvas: dimension{Width: 379, Height: 577},
+		Window: dimension{Width: 248, Height: 310},
+		Sprite: dimension{Width: 240, Height: 300},
+	}
+	layout.Face.X = 0.34
+	layout.Face.Y = 0.06
+	layout.Face.Width = 0.32
+	layout.Face.Height = 0.2
+	m := &Model{layout: layout, scale: 1, bubbleAnchorX: 0.5, bubbleAnchorY: 0.05}
+	m.applyLayout()
+
+	imageRect := m.ImageRect()
+	if math.Abs(float64(imageRect.X-25.47)) > 0.02 ||
+		math.Abs(float64(imageRect.Y-5)) > 0.01 ||
+		math.Abs(float64(imageRect.W-197.05)) > 0.02 ||
+		math.Abs(float64(imageRect.H-300)) > 0.01 {
+		t.Fatalf("image rect = %+v, want approximately (25.47,5) 197.05x300", imageRect)
+	}
+	face := m.FaceRegion()
+	if math.Abs(float64(face.X-92.47)) > 0.02 ||
+		math.Abs(float64(face.Y-23)) > 0.02 ||
+		math.Abs(float64(face.W-63.06)) > 0.02 ||
+		math.Abs(float64(face.H-60)) > 0.02 {
+		t.Fatalf("face = %+v, want approximately (92.47,23) 63.06x60", face)
+	}
+	bubble := m.BubbleRect()
+	if math.Abs(float64(bubble.X-124)) > 0.02 ||
+		math.Abs(float64(bubble.Y-20)) > 0.02 ||
+		bubble.W != 1 || math.Abs(float64(bubble.H-290)) > 0.02 {
+		t.Fatalf("bubble anchor = %+v, want approximately (124,20) 1x290", bubble)
 	}
 }
 
@@ -57,11 +130,11 @@ func TestScaleLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.SetScale(1.25)
-	if got := m.Size(); got != 310 {
-		t.Fatalf("scaled window size = %d, want 310", got)
+	if got, gotHeight := m.WindowSize(); got != 310 || gotHeight != 310 {
+		t.Fatalf("scaled window size = %dx%d, want 310x310", got, gotHeight)
 	}
-	if got := m.SpriteSize(); got != 300 {
-		t.Fatalf("scaled sprite size = %d, want 300", got)
+	if got, gotHeight := m.SpriteSize(); got != 300 || gotHeight != 300 {
+		t.Fatalf("scaled sprite size = %dx%d, want 300x300", got, gotHeight)
 	}
 	face := m.FaceRegion()
 	if math.Abs(float64(face.X-97.5)) > 0.01 ||
@@ -116,7 +189,7 @@ func TestViewRendersTransparentPet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, m.Size(), m.Size())
+	tt := newPetTester(m)
 	tt.Frame()
 
 	rect, ok := tt.Find("Lucia 桌宠")
@@ -346,7 +419,7 @@ func TestInteractionWakesForNextFrame(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, m.Size(), m.Size())
+	tt := newPetTester(m)
 	tt.Frame()
 	tt.Advance(asleepAfter)
 	tt.Frame()
@@ -398,7 +471,7 @@ func TestClickFaceStartsReaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, m.Size(), m.Size())
+	tt := newPetTester(m)
 	tt.Frame()
 	tt.ClickAt(128, 150)
 	tt.Frame()
@@ -416,7 +489,7 @@ func TestClickFaceScalesWithLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.SetScale(1.5)
-	tt := ui.NewTester(m.View, m.Size(), m.Size())
+	tt := newPetTester(m)
 	tt.Frame()
 	face := m.FaceRegion()
 	tt.ClickAt(face.X+face.W/2, face.Y+face.H/2)
@@ -431,7 +504,7 @@ func TestClickHeadbandDoesNotStartReaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, m.Size(), m.Size())
+	tt := newPetTester(m)
 	tt.Frame()
 	tt.ClickAt(124, 60)
 	tt.Frame()
@@ -448,7 +521,7 @@ func TestClickBodyKeepsDragArea(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, m.Size(), m.Size())
+	tt := newPetTester(m)
 	tt.Frame()
 	tt.ClickAt(124, 200)
 	tt.Frame()
@@ -465,7 +538,7 @@ func TestContextMenuStartsReaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tt := ui.NewTester(m.View, m.Size(), m.Size())
+	tt := newPetTester(m)
 	tt.Frame()
 	tt.RightClickAt(124, 200)
 	found := false
@@ -501,7 +574,7 @@ func TestContextMenuApplicationActions(t *testing.T) {
 		Hide:         func() { calls = append(calls, "hide") },
 		Reset:        func() { calls = append(calls, "reset") },
 	})
-	tt := ui.NewTester(m.View, m.Size(), m.Size())
+	tt := newPetTester(m)
 	tt.Frame()
 
 	tt.RightClickAt(124, 200)
