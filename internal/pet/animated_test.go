@@ -200,13 +200,16 @@ func TestAnimatedSpecialMenu(t *testing.T) {
 	found := false
 	for _, item := range items {
 		if item == "小动作" {
+			t.Fatalf("menu still contains the old 小动作 submenu: %v", items)
+		}
+		if item == "肚肚挑衅" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("menu = %v, want 小动作", items)
+		t.Fatalf("menu = %v, want 肚肚挑衅 at the top level", items)
 	}
-	if err := tt.ChooseMenuItem("小动作", "肚肚挑衅"); err != nil {
+	if err := tt.ChooseMenuItem("肚肚挑衅"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()

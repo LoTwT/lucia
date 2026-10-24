@@ -279,14 +279,13 @@ func (m *Model) View(c *ui.Context) {
 		}
 		if m.animated != nil && m.animated.canPlayActions() {
 			if actions := m.animated.onceActions(); len(actions) > 0 {
-				menu.Submenu("小动作", func(sub *ui.Menu) {
-					for _, action := range actions {
-						if sub.Item(action.Label).Chosen() {
-							m.animated.requestAction(action.ID)
-							m.invalidate()
-						}
+				menu.Separator()
+				for _, action := range actions {
+					if menu.Item(action.Label).Chosen() {
+						m.animated.requestAction(action.ID)
+						m.invalidate()
 					}
-				})
+				}
 			}
 		}
 		if m.menuActions.OpenSettings == nil && m.menuActions.Hide == nil && m.menuActions.Reset == nil {
