@@ -129,6 +129,7 @@ type clipPlay struct {
 	provider   frameProvider
 	frame      int
 	frameStart time.Time
+	holdUntil  time.Time
 	loops      int
 }
 
@@ -148,6 +149,10 @@ type animatedModel struct {
 	idleFailed  atomic.Bool
 
 	current *clipPlay
+
+	sequence      []petpack.PresetStep
+	sequenceIndex int
+	sequenceAt    time.Time
 
 	pendingOnce     string
 	queuedOnce      []string
@@ -224,10 +229,11 @@ func NewAnimated(pack *petpack.Pack) (*Model, error) {
 	layout.Face.Width = pack.Manifest.Face.Width
 	layout.Face.Height = pack.Manifest.Face.Height
 	m := &Model{
-		layout:        layout,
-		scale:         defaultScale,
-		bubbleAnchorX: pack.Manifest.BubbleAnchor.X,
-		bubbleAnchorY: pack.Manifest.BubbleAnchor.Y,
+		layout:         layout,
+		scale:          defaultScale,
+		hotzoneEntries: pack.HotzoneList(),
+		bubbleAnchorX:  pack.Manifest.BubbleAnchor.X,
+		bubbleAnchorY:  pack.Manifest.BubbleAnchor.Y,
 	}
 	if m.bubbleAnchorX == 0 && m.bubbleAnchorY == 0 {
 		m.bubbleAnchorX = 0.5
@@ -336,6 +342,52 @@ func (a *animatedModel) startIdle(now time.Time) {
 	}
 }
 
+func (a *animatedModel) requestPreset(presetID, action string) bool {
+	if a.reduceMotion || presetID == "" {
+		return false
+	}
+	preset, ok := a.pack.Preset(presetID)
+	if !ok {
+		return false
+	}
+	steps := append([]petpack.PresetStep(nil), preset.Steps...)
+	if len(steps) == 0 && action != "" {
+		steps = []petpack.PresetStep{{Action: action}}
+	}
+	if len(steps) == 0 {
+		return false
+	}
+	a.sequence = steps
+	a.sequenceIndex = 0
+	a.sequenceAt = time.Time{}
+	a.pendingOnce = ""
+	a.queuedOnce = nil
+	a.pendingReaction = ReactionNone
+	return true
+}
+
+func (a *animatedModel) clearSequence() {
+	a.sequence = nil
+	a.sequenceIndex = 0
+	a.sequenceAt = time.Time{}
+}
+
+func (a *animatedModel) startNextSequence(now time.Time) bool {
+	for a.sequenceIndex < len(a.sequence) {
+		step := a.sequence[a.sequenceIndex]
+		a.sequenceIndex++
+		if step.Action == "" {
+			continue
+		}
+		if a.startAction(step.Action, now) {
+			a.sequenceAt = time.Time{}
+			return true
+		}
+	}
+	a.clearSequence()
+	return false
+}
+
 func (a *animatedModel) requestReaction(reaction Reaction) {
 	if reaction == ReactionNone || a.reduceMotion {
 		return
@@ -348,6 +400,7 @@ func (a *animatedModel) requestAction(id string) {
 	if a.reduceMotion || id == "" {
 		return
 	}
+	a.clearSequence()
 	// The first-launch wave can be requested before the first View syncs.
 	// Background update notifications must queue behind it instead of
 	// replacing the only chance to play the intro.
@@ -374,6 +427,7 @@ func (a *animatedModel) requestDragStart() {
 	if a.reduceMotion {
 		return
 	}
+	a.clearSequence()
 	a.pendingDrag = true
 	a.pendingDrop = false
 	a.pendingReaction = ReactionNone
@@ -415,6 +469,7 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 		a.pendingReaction = ReactionNone
 		a.pendingOnce = ""
 		a.queuedOnce = nil
+		a.clearSequence()
 		a.asleep = activity == ActivityAsleep
 		return
 	}
@@ -459,6 +514,17 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 		}
 		a.advance(now)
 		return
+	}
+
+	if a.sequenceIndex < len(a.sequence) && (a.current == nil || a.current.actionID == "idle") {
+		if a.sequenceAt.IsZero() || !now.Before(a.sequenceAt) {
+			if a.startNextSequence(now) {
+				a.advance(now)
+				return
+			}
+		} else {
+			return
+		}
 	}
 
 	if a.pendingReaction != ReactionNone {
@@ -529,19 +595,31 @@ func (a *animatedModel) advance(now time.Time) {
 		if now.Sub(current.frameStart) < duration {
 			return
 		}
-		current.frameStart = current.frameStart.Add(duration)
-		current.frame++
-		if current.frame < current.provider.Len() {
+		if current.frame+1 < current.provider.Len() {
+			current.frameStart = current.frameStart.Add(duration)
+			current.frame++
 			continue
+		}
+		// The last frame is on screen. A pack can hold it before entering
+		// the next phase; this is the asset-level timing beat.
+		if current.holdUntil.IsZero() {
+			if hold := actionHold(current.action, current.phase); hold > 0 {
+				current.holdUntil = current.frameStart.Add(duration).Add(hold)
+				return
+			}
+		} else if now.Before(current.holdUntil) {
+			return
+		} else {
+			current.holdUntil = time.Time{}
 		}
 		switch current.phase {
 		case phaseEnter:
 			if current.action.Loop != "" && current.action.LoopCount != 0 {
-				if a.startSegment(current.actionID, current.action, phaseLoop, current.action.Loop, current.frameStart) {
+				if a.startSegment(current.actionID, current.action, phaseLoop, current.action.Loop, now) {
 					continue
 				}
 			}
-			if current.action.Exit != "" && a.startSegment(current.actionID, current.action, phaseExit, current.action.Exit, current.frameStart) {
+			if current.action.Exit != "" && a.startSegment(current.actionID, current.action, phaseExit, current.action.Exit, now) {
 				continue
 			}
 			a.finishCurrent(now)
@@ -549,16 +627,18 @@ func (a *animatedModel) advance(now time.Time) {
 		case phaseLoop:
 			if current.action.LoopCount < 0 {
 				current.frame = 0
+				current.frameStart = now
 				current.provider.Reset()
 				continue
 			}
 			current.loops++
 			if current.loops < current.action.LoopCount {
 				current.frame = 0
+				current.frameStart = now
 				current.provider.Reset()
 				continue
 			}
-			if current.action.Exit != "" && a.startSegment(current.actionID, current.action, phaseExit, current.action.Exit, current.frameStart) {
+			if current.action.Exit != "" && a.startSegment(current.actionID, current.action, phaseExit, current.action.Exit, now) {
 				continue
 			}
 			a.finishCurrent(now)
@@ -570,11 +650,36 @@ func (a *animatedModel) advance(now time.Time) {
 	}
 }
 
+func actionHold(action petpack.Action, phase playPhase) time.Duration {
+	var millis int
+	switch phase {
+	case phaseEnter:
+		millis = action.Timing.EnterHoldMs
+	case phaseLoop:
+		millis = action.Timing.LoopHoldMs
+	case phaseExit, phaseOnce:
+		millis = action.Timing.ExitHoldMs
+	}
+	if millis <= 0 {
+		return 0
+	}
+	return time.Duration(millis) * time.Millisecond
+}
+
 func (a *animatedModel) finishCurrent(now time.Time) {
 	if a.current != nil && a.current.provider != nil {
 		a.current.provider.Close()
 	}
 	a.current = nil
+	if a.sequenceIndex < len(a.sequence) {
+		if delay := a.sequence[a.sequenceIndex].DelayMs; delay > 0 {
+			a.sequenceAt = now.Add(time.Duration(delay) * time.Millisecond)
+		} else {
+			a.sequenceAt = time.Time{}
+		}
+		return
+	}
+	a.clearSequence()
 	if a.pendingReaction != ReactionNone {
 		actionID := "happy"
 		if a.pendingReaction == ReactionFace {
@@ -650,11 +755,20 @@ func (a *animatedModel) nextDelay(now time.Time, activity Activity, idle time.Du
 	if a.asleep {
 		return 0
 	}
+	if a.sequenceIndex < len(a.sequence) && (a.current == nil || a.current.actionID == "idle") {
+		if a.sequenceAt.IsZero() {
+			return time.Millisecond
+		}
+		return max(a.sequenceAt.Sub(now), time.Millisecond)
+	}
 	if a.current != nil && a.current.provider != nil {
 		if a.current.provider.Failed() {
 			// Stop asking for frames after a decode error. The next sync or
 			// interaction will finish the broken clip and return to idle.
 			return 0
+		}
+		if !a.current.holdUntil.IsZero() {
+			return max(a.current.holdUntil.Sub(now), time.Millisecond)
 		}
 		duration := a.current.provider.Duration(a.current.frame)
 		if duration <= 0 {

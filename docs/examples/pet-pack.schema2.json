@@ -1,0 +1,78 @@
+{
+  "schema": 2,
+  "id": "example",
+  "name": "示例素材包",
+  "license": {
+    "status": "local-only",
+    "note": "示例字段；实际素材包由用户本地授权"
+  },
+  "canvas": { "width": 800, "height": 800 },
+  "crop": { "x": 120, "y": 40, "width": 420, "height": 620 },
+  "base": {
+    "window": { "width": 248, "height": 310 },
+    "sprite": { "width": 240, "height": 300 },
+    "margin": 4
+  },
+  "face": { "x": 0.34, "y": 0.06, "width": 0.32, "height": 0.20 },
+  "bubbleAnchor": { "x": 0.5, "y": 0.05 },
+  "clips": {
+    "idle_loop": { "file": "clips/idle_loop.webp", "frames": 96, "loop": true },
+    "happy_enter": { "file": "clips/happy_enter.webp", "frames": 8 },
+    "happy_exit": { "file": "clips/happy_exit.webp", "frames": 8 },
+    "wave_once": { "file": "clips/wave_once.webp", "frames": 24 }
+  },
+  "actions": {
+    "idle": {
+      "label": "待机",
+      "loop": "idle_loop",
+      "poster": "idle_loop#0",
+      "faceClickable": true,
+      "loopCount": -1
+    },
+    "happy": {
+      "label": "开心",
+      "enter": "happy_enter",
+      "exit": "happy_exit",
+      "poster": "happy_enter#0",
+      "faceClickable": true,
+      "timing": { "enterHoldMs": 80, "exitHoldMs": 100 }
+    },
+    "wave": {
+      "label": "挥手",
+      "once": "wave_once",
+      "poster": "wave_once#0",
+      "timing": { "exitHoldMs": 120 }
+    }
+  },
+  "hotzones": {
+    "face": {
+      "label": "摸摸脸",
+      "preset": "tap",
+      "action": "happy",
+      "rect": { "x": 0.34, "y": 0.06, "width": 0.32, "height": 0.20 }
+    },
+    "head": {
+      "label": "摸摸头",
+      "preset": "pat",
+      "action": "happy",
+      "rect": { "x": 0.20, "y": 0.00, "width": 0.60, "height": 0.16 }
+    }
+  },
+  "presets": {
+    "tap": {
+      "reaction": "face",
+      "bubble": "face",
+      "steps": [
+        { "action": "happy" }
+      ]
+    },
+    "pat": {
+      "reaction": "pat",
+      "bubble": "pat",
+      "steps": [
+        { "action": "happy" },
+        { "action": "wave", "delayMs": 120 }
+      ]
+    }
+  }
+}

@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -64,6 +65,15 @@ type ClipEntry struct {
 	SHA256 string `json:"sha256,omitempty"`
 }
 
+// Timing holds extra pauses after each phase. Frame metadata still decides
+// how long every frame stays visible; these values let a pack add a beat
+// between the authored segments without changing the WebP.
+type Timing struct {
+	EnterHoldMs int `json:"enterHoldMs,omitempty"`
+	LoopHoldMs  int `json:"loopHoldMs,omitempty"`
+	ExitHoldMs  int `json:"exitHoldMs,omitempty"`
+}
+
 // Action maps one user-facing behavior to clip IDs. Enter, Loop and Exit are
 // a chain; Once is a single clip. Poster names a clip and frame for Reduce
 // Motion and is written as "clip#frame".
@@ -77,10 +87,37 @@ type Action struct {
 	FaceClickable bool   `json:"faceClickable,omitempty"`
 	// LoopCount is how many full loop passes precede the exit. Zero skips
 	// the loop, -1 means "until the state ends" (idle and drag).
-	LoopCount int `json:"loopCount,omitempty"`
+	LoopCount int    `json:"loopCount,omitempty"`
+	Timing    Timing `json:"timing,omitempty"`
 }
 
-// Manifest is the pack.json schema.
+// Hotzone is one normalized clickable rectangle on the cropped artwork.
+// Preset selects an interaction sequence; Action is used when the preset
+// has no explicit steps.
+type Hotzone struct {
+	Label  string `json:"label,omitempty"`
+	Preset string `json:"preset,omitempty"`
+	Action string `json:"action,omitempty"`
+	Rect   Face   `json:"rect"`
+}
+
+// PresetStep is one action in a preset sequence. DelayMs is applied before
+// the step starts, after the previous action finishes.
+type PresetStep struct {
+	Action  string `json:"action"`
+	DelayMs int    `json:"delayMs,omitempty"`
+}
+
+// Preset is a reusable interaction sequence triggered by a hotzone.
+// Reaction and Bubble accept "face", "pat" or "none".
+type Preset struct {
+	Reaction string       `json:"reaction,omitempty"`
+	Bubble   string       `json:"bubble,omitempty"`
+	Steps    []PresetStep `json:"steps,omitempty"`
+}
+
+// Manifest is the pack.json schema. Schema 1 is upgraded in memory to the
+// schema 2 defaults so the player and console only deal with one shape.
 type Manifest struct {
 	Schema       int                  `json:"schema"`
 	ID           string               `json:"id"`
@@ -93,6 +130,14 @@ type Manifest struct {
 	BubbleAnchor Anchor               `json:"bubbleAnchor"`
 	Clips        map[string]ClipEntry `json:"clips"`
 	Actions      map[string]Action    `json:"actions"`
+	Hotzones     map[string]Hotzone   `json:"hotzones,omitempty"`
+	Presets      map[string]Preset    `json:"presets,omitempty"`
+}
+
+// HotzoneEntry is a named hotzone in stable display order.
+type HotzoneEntry struct {
+	ID string
+	Hotzone
 }
 
 // Pack is a validated manifest plus its parsed clips.
@@ -110,6 +155,33 @@ func Load(root, id string, displayScale float64) (*Pack, error) {
 	return loadPackDir(filepath.Join(root, "packs", id), id, displayScale)
 }
 
+// LoadDir validates a pack from an explicit directory. It is used by the
+// management store and the check command.
+func LoadDir(dir, id string, displayScale float64) (*Pack, error) {
+	return loadPackDir(dir, id, displayScale)
+}
+
+// ReadManifest parses and validates only the manifest. Management listing
+// uses it so a broken clip does not make an otherwise visible pack vanish.
+func ReadManifest(dir, id string) (Manifest, error) {
+	if !validPackID(id) {
+		return Manifest{}, fmt.Errorf("petpack: invalid pack id %q", id)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "pack.json"))
+	if err != nil {
+		return Manifest{}, fmt.Errorf("petpack %q: read manifest: %w", id, err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return Manifest{}, fmt.Errorf("petpack %q: parse manifest: %w", id, err)
+	}
+	normalizeManifest(&manifest)
+	if err := validateManifest(id, manifest); err != nil {
+		return Manifest{}, err
+	}
+	return manifest, nil
+}
+
 // loadPackDir validates a pack from its final directory. Import uses it after
 // installing the new directory, without assuming the parent directory is
 // named "packs".
@@ -125,6 +197,7 @@ func loadPackDir(dir, id string, displayScale float64) (*Pack, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("petpack %q: parse manifest: %w", id, err)
 	}
+	normalizeManifest(&manifest)
 	if err := validateManifest(id, manifest); err != nil {
 		return nil, err
 	}
@@ -202,8 +275,8 @@ func loadPackDir(dir, id string, displayScale float64) (*Pack, error) {
 }
 
 func validateManifest(id string, manifest Manifest) error {
-	if manifest.Schema != 1 {
-		return fmt.Errorf("petpack %q: schema %d, want 1", id, manifest.Schema)
+	if manifest.Schema != 1 && manifest.Schema != 2 {
+		return fmt.Errorf("petpack %q: schema %d, want 1 or 2", id, manifest.Schema)
 	}
 	if manifest.ID != "" && manifest.ID != id {
 		return fmt.Errorf("petpack %q: manifest id %q", id, manifest.ID)
@@ -228,8 +301,12 @@ func validateManifest(id string, manifest Manifest) error {
 		return fmt.Errorf("petpack %q: sprite exceeds window", id)
 	}
 	face := manifest.Face
-	if face.Width <= 0 || face.Height <= 0 || face.X < 0 || face.Y < 0 ||
-		face.X+face.Width > 1 || face.Y+face.Height > 1 {
+	if face.Width > 0 || face.Height > 0 {
+		if face.Width <= 0 || face.Height <= 0 || face.X < 0 || face.Y < 0 ||
+			face.X+face.Width > 1 || face.Y+face.Height > 1 {
+			return fmt.Errorf("petpack %q: face is not a normalized sub-rectangle", id)
+		}
+	} else if len(manifest.Hotzones) == 0 {
 		return fmt.Errorf("petpack %q: face is not a normalized sub-rectangle", id)
 	}
 	if manifest.BubbleAnchor.X < 0 || manifest.BubbleAnchor.X > 1 ||
@@ -239,12 +316,178 @@ func validateManifest(id string, manifest Manifest) error {
 	if len(manifest.Clips) == 0 {
 		return fmt.Errorf("petpack %q: no clips", id)
 	}
+	for actionID, action := range manifest.Actions {
+		if action.LoopCount < -1 {
+			return fmt.Errorf("petpack %q action %q: loopCount %d", id, actionID, action.LoopCount)
+		}
+		for name, hold := range map[string]int{
+			"enterHoldMs": action.Timing.EnterHoldMs,
+			"loopHoldMs":  action.Timing.LoopHoldMs,
+			"exitHoldMs":  action.Timing.ExitHoldMs,
+		} {
+			if hold < 0 || hold > 60000 {
+				return fmt.Errorf("petpack %q action %q: %s %d outside 0..60000", id, actionID, name, hold)
+			}
+		}
+	}
+	if len(manifest.Presets) > 64 {
+		return fmt.Errorf("petpack %q: more than 64 presets", id)
+	}
+	for presetID, preset := range manifest.Presets {
+		if !validPackID(presetID) {
+			return fmt.Errorf("petpack %q: invalid preset id %q", id, presetID)
+		}
+		switch preset.Reaction {
+		case "", "face", "pat", "none":
+		default:
+			return fmt.Errorf("petpack %q preset %q: invalid reaction %q", id, presetID, preset.Reaction)
+		}
+		switch preset.Bubble {
+		case "", "face", "pat", "none":
+		default:
+			return fmt.Errorf("petpack %q preset %q: invalid bubble %q", id, presetID, preset.Bubble)
+		}
+		if len(preset.Steps) > 32 {
+			return fmt.Errorf("petpack %q preset %q: more than 32 steps", id, presetID)
+		}
+		for i, step := range preset.Steps {
+			if step.Action == "" {
+				return fmt.Errorf("petpack %q preset %q step %d: empty action", id, presetID, i)
+			}
+			action, ok := manifest.Actions[step.Action]
+			if !ok {
+				return fmt.Errorf("petpack %q preset %q step %d references missing action %q", id, presetID, i, step.Action)
+			}
+			if action.LoopCount < 0 {
+				return fmt.Errorf("petpack %q preset %q step %d uses looping action %q", id, presetID, i, step.Action)
+			}
+			if action.Once == "" && action.Enter == "" && action.Loop == "" && action.Exit == "" {
+				return fmt.Errorf("petpack %q preset %q step %d action %q has no clip", id, presetID, i, step.Action)
+			}
+			if step.DelayMs < 0 || step.DelayMs > 60000 {
+				return fmt.Errorf("petpack %q preset %q step %d: delay %d outside 0..60000", id, presetID, i, step.DelayMs)
+			}
+		}
+	}
+	if len(manifest.Hotzones) > 64 {
+		return fmt.Errorf("petpack %q: more than 64 hotzones", id)
+	}
+	for hotzoneID, zone := range manifest.Hotzones {
+		if !validPackID(hotzoneID) {
+			return fmt.Errorf("petpack %q: invalid hotzone id %q", id, hotzoneID)
+		}
+		rect := zone.Rect
+		if rect.Width <= 0 || rect.Height <= 0 || rect.X < 0 || rect.Y < 0 ||
+			rect.X+rect.Width > 1 || rect.Y+rect.Height > 1 {
+			return fmt.Errorf("petpack %q hotzone %q: rect is not a normalized sub-rectangle", id, hotzoneID)
+		}
+		if _, ok := manifest.Presets[zone.Preset]; !ok {
+			return fmt.Errorf("petpack %q hotzone %q: missing preset %q", id, hotzoneID, zone.Preset)
+		}
+		if zone.Action != "" {
+			if _, ok := manifest.Actions[zone.Action]; !ok {
+				return fmt.Errorf("petpack %q hotzone %q: missing action %q", id, hotzoneID, zone.Action)
+			}
+		}
+	}
 	return nil
 }
 
 func actionClips(action Action) []string {
 	return []string{action.Enter, action.Loop, action.Exit, action.Once}
 }
+
+// normalizeManifest turns schema 1 into the same in-memory shape as schema 2
+// and fills the built-in interaction defaults. The original file is not
+// rewritten; import and export use schema 2 explicitly.
+func normalizeManifest(manifest *Manifest) {
+	if manifest.Schema == 1 {
+		manifest.Schema = 2
+	}
+	if manifest.Hotzones == nil {
+		manifest.Hotzones = make(map[string]Hotzone)
+	}
+	if manifest.Presets == nil {
+		manifest.Presets = make(map[string]Preset)
+	}
+	if len(manifest.Hotzones) == 0 && manifest.Face.Width > 0 && manifest.Face.Height > 0 {
+		manifest.Hotzones["face"] = Hotzone{
+			Label:  "摸摸脸",
+			Preset: "tap",
+			Rect:   manifest.Face,
+		}
+	}
+	for hotspotID, zone := range manifest.Hotzones {
+		if zone.Preset == "" {
+			zone.Preset = "tap"
+			manifest.Hotzones[hotspotID] = zone
+		}
+	}
+	if _, ok := manifest.Presets["tap"]; !ok {
+		steps := defaultPresetSteps(manifest.Actions, "laugh", "happy")
+		manifest.Presets["tap"] = Preset{Reaction: "face", Bubble: "face", Steps: steps}
+	}
+	if _, ok := manifest.Presets["pat"]; !ok {
+		steps := defaultPresetSteps(manifest.Actions, "happy", "laugh")
+		manifest.Presets["pat"] = Preset{Reaction: "pat", Bubble: "pat", Steps: steps}
+	}
+	for presetID, preset := range manifest.Presets {
+		if preset.Reaction == "" {
+			switch presetID {
+			case "tap":
+				preset.Reaction = "face"
+			case "pat":
+				preset.Reaction = "pat"
+			default:
+				preset.Reaction = "none"
+			}
+		}
+		if preset.Bubble == "" {
+			switch presetID {
+			case "tap":
+				preset.Bubble = "face"
+			case "pat":
+				preset.Bubble = "pat"
+			default:
+				preset.Bubble = "none"
+			}
+		}
+		manifest.Presets[presetID] = preset
+	}
+}
+
+func defaultPresetSteps(actions map[string]Action, candidates ...string) []PresetStep {
+	for _, id := range candidates {
+		action, ok := actions[id]
+		if !ok || action.LoopCount < 0 {
+			continue
+		}
+		if action.Once == "" && action.Enter == "" && action.Loop == "" && action.Exit == "" {
+			continue
+		}
+		return []PresetStep{{Action: id}}
+	}
+	return nil
+}
+
+// Preset returns a preset by id.
+func (p *Pack) Preset(id string) (Preset, bool) {
+	preset, ok := p.Manifest.Presets[id]
+	return preset, ok
+}
+
+// HotzoneList returns hotzones in stable id order. A map cannot be iterated
+// on the UI thread without producing a different click order every frame.
+func (m Manifest) HotzoneList() []HotzoneEntry {
+	out := make([]HotzoneEntry, 0, len(m.Hotzones))
+	for id, zone := range m.Hotzones {
+		out = append(out, HotzoneEntry{ID: id, Hotzone: zone})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func (p *Pack) HotzoneList() []HotzoneEntry { return p.Manifest.HotzoneList() }
 
 func splitPoster(poster string) (string, int, error) {
 	clipID, frameText, ok := strings.Cut(poster, "#")

@@ -137,6 +137,24 @@ func newPetWindow(model *pet.Model, quitting func() bool, visible bool) *petWind
 	return p
 }
 
+// SetModel swaps the artwork and interaction map while keeping the window's
+// bottom center in place. It runs on the UI thread.
+func (p *petWindow) SetModel(model *pet.Model) {
+	if p == nil || p.win == nil || p.win.IsDestroyed() || model == nil {
+		return
+	}
+	old := p.Rect()
+	p.model = model
+	model.SetInvalidator(p.win.Invalidate)
+	width, height := model.WindowSize()
+	p.width.Store(int32(width))
+	p.height.Store(int32(height))
+	p.win.SetSize(width, height)
+	p.win.SetPosition(old.X+(old.Width-width)/2, old.Y+old.Height-height)
+	p.clampOutside()
+	p.win.Update(func() {})
+}
+
 func (p *petWindow) Toggle() {
 	if p == nil || p.win == nil || p.win.IsDestroyed() {
 		return

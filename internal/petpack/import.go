@@ -31,7 +31,8 @@ type importedClip struct {
 }
 
 // ImportOptions controls the metadata written by an import. Base and Face
-// are presentation choices; the clips and crop come from the zip.
+// are presentation choices; the clips and crop come from the zip. A pack
+// may carry its own pack.json, which supplies any field left zero here.
 type ImportOptions struct {
 	ID           string
 	Name         string
@@ -39,12 +40,35 @@ type ImportOptions struct {
 	Face         Face
 	BubbleAnchor Anchor
 	Force        bool
+	// OnStage reports the import's current stage for crash recovery. It is
+	// called synchronously from ImportZip.
+	OnStage func(string)
 }
 
 // ImportZip converts an animated-WebP zip into packs/<id> and returns the
 // validated pack. The zip is never copied wholesale; only .webp clips are
-// extracted.
+// extracted. A root pack.json or pack.meta.json supplies id, name, geometry,
+// actions, hotzones and presets; the ClipEntry list is rebuilt from the
+// extracted files.
 func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
+	stage := func(name string) {
+		if opts.OnStage != nil {
+			opts.OnStage(name)
+		}
+	}
+	stage("reading")
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return nil, fmt.Errorf("petpack import: open zip: %w", err)
+	}
+	defer reader.Close()
+	baseManifest, hasManifest, err := readZipManifest(reader.File)
+	if err != nil {
+		return nil, fmt.Errorf("petpack import: read manifest: %w", err)
+	}
+	if opts.ID == "" {
+		opts.ID = baseManifest.ID
+	}
 	if opts.ID == "" {
 		return nil, fmt.Errorf("petpack import: empty pack id")
 	}
@@ -52,7 +76,13 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		return nil, fmt.Errorf("petpack import: invalid pack id %q", opts.ID)
 	}
 	if opts.Name == "" {
+		opts.Name = baseManifest.Name
+	}
+	if opts.Name == "" {
 		opts.Name = opts.ID
+	}
+	if opts.BubbleAnchor.X == 0 && opts.BubbleAnchor.Y == 0 {
+		opts.BubbleAnchor = baseManifest.BubbleAnchor
 	}
 	if opts.BubbleAnchor.X == 0 && opts.BubbleAnchor.Y == 0 {
 		opts.BubbleAnchor = Anchor{X: 0.5, Y: 0.05}
@@ -60,11 +90,7 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	if err := os.MkdirAll(packsRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("petpack import: create packs directory: %w", err)
 	}
-	reader, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return nil, fmt.Errorf("petpack import: open zip: %w", err)
-	}
-	defer reader.Close()
+	stage("extracting")
 
 	tmp, err := os.MkdirTemp(packsRoot, ".import-"+opts.ID+"-")
 	if err != nil {
@@ -154,24 +180,58 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	}
 	crop = crop.Inset(-2).Intersect(image.Rect(0, 0, canvas.Width, canvas.Height))
 
+	base := opts.Base
+	if base.Window.Width == 0 && base.Window.Height == 0 {
+		base = baseManifest.Base
+	}
+	if base.Window.Width <= 0 || base.Window.Height <= 0 ||
+		base.Sprite.Width <= 0 || base.Sprite.Height <= 0 {
+		return nil, fmt.Errorf("petpack import: base window and sprite sizes are required")
+	}
+	face := opts.Face
+	if face.Width <= 0 && face.Height <= 0 {
+		face = baseManifest.Face
+	}
+	license := baseManifest.License
+	if len(license) == 0 {
+		license = json.RawMessage(`{"status":"local-only","note":"imported by the user; not distributed with Lucia"}`)
+	}
+	actions := baseManifest.Actions
+	if len(actions) == 0 {
+		actions = buildActions(imported)
+	}
+	hotzones := baseManifest.Hotzones
+	presets := baseManifest.Presets
+	if !hasManifest {
+		hotzones = nil
+		presets = nil
+	}
 	manifest := Manifest{
-		Schema:  1,
+		Schema:  2,
 		ID:      opts.ID,
 		Name:    opts.Name,
-		License: json.RawMessage(`{"status":"local-only","note":"imported by the user; not distributed with Lucia"}`),
+		License: license,
 		Canvas:  canvas,
 		Crop: Rect{
 			X: crop.Min.X, Y: crop.Min.Y, Width: crop.Dx(), Height: crop.Dy(),
 		},
-		Base:         opts.Base,
-		Face:         opts.Face,
+		Base:         base,
+		Face:         face,
 		BubbleAnchor: opts.BubbleAnchor,
 		Clips:        make(map[string]ClipEntry, len(imported)),
-		Actions:      buildActions(imported),
+		Actions:      actions,
+		Hotzones:     hotzones,
+		Presets:      presets,
 	}
 	for id, item := range imported {
-		manifest.Clips[id] = item.entry
+		entry := item.entry
+		if old, ok := baseManifest.Clips[id]; ok {
+			entry.Loop = old.Loop
+		}
+		manifest.Clips[id] = entry
 	}
+	normalizeManifest(&manifest)
+	stage("installing")
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("petpack import: encode manifest: %w", err)
@@ -219,6 +279,7 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		return nil, fmt.Errorf("petpack import: install %q: %w", final, err)
 	}
 	// The deferred cleanup now finds nothing at tmp; final is validated below.
+	stage("validating")
 	pack, err := loadPackDir(final, opts.ID, 1)
 	if err != nil {
 		if rollbackErr := restore(); rollbackErr != nil {
@@ -398,4 +459,68 @@ func buildActions(imported map[string]importedClip) map[string]Action {
 		}
 	}
 	return actions
+}
+
+// ReadZipManifest inspects a pack zip without extracting artwork. The
+// returned manifest is normalized but not validated against clips, so the
+// console can show the pack id and license before asking for confirmation.
+func ReadZipManifest(zipPath string) (Manifest, bool, error) {
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return Manifest{}, false, fmt.Errorf("petpack: open zip: %w", err)
+	}
+	defer reader.Close()
+	return readZipManifest(reader.File)
+}
+
+func readZipManifest(files []*zip.File) (Manifest, bool, error) {
+	entry := findManifestEntry(files, "pack.json")
+	if entry == nil {
+		entry = findManifestEntry(files, "pack.meta.json")
+	}
+	if entry == nil {
+		return Manifest{}, false, nil
+	}
+	const limit = 4 << 20
+	if entry.UncompressedSize64 > limit {
+		return Manifest{}, true, fmt.Errorf("%s exceeds the 4 MiB manifest limit", entry.Name)
+	}
+	reader, err := entry.Open()
+	if err != nil {
+		return Manifest{}, true, fmt.Errorf("open %s: %w", entry.Name, err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return Manifest{}, true, fmt.Errorf("read %s: %w", entry.Name, err)
+	}
+	if len(data) > limit {
+		return Manifest{}, true, fmt.Errorf("%s exceeds the 4 MiB manifest limit", entry.Name)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return Manifest{}, true, fmt.Errorf("parse %s: %w", entry.Name, err)
+	}
+	normalizeManifest(&manifest)
+	return manifest, true, nil
+}
+
+func findManifestEntry(files []*zip.File, name string) *zip.File {
+	var best *zip.File
+	bestDepth := 1 << 30
+	for _, file := range files {
+		if file.FileInfo().IsDir() || isMacMetadata(file.Name) {
+			continue
+		}
+		clean := path.Clean(zipEntryName(file))
+		if clean != name && !strings.HasSuffix(clean, "/"+name) {
+			continue
+		}
+		depth := strings.Count(clean, "/")
+		if best == nil || depth < bestDepth {
+			best = file
+			bestDepth = depth
+		}
+	}
+	return best
 }

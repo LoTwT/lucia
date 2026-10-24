@@ -9,6 +9,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/LoTwT/lucia/internal/petpack"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -97,6 +98,8 @@ type Model struct {
 	spriteHeight    int
 	imageRect       ui.Rect
 	faceRegion      ui.Rect
+	hotzones        []Hotzone
+	hotzoneEntries  []petpack.HotzoneEntry
 	bubbleAnchorX   float64
 	bubbleAnchorY   float64
 	bubbleRect      ui.Rect
@@ -111,6 +114,17 @@ type Model struct {
 	onInvalidate    func()
 	menuActions     MenuActions
 	animated        *animatedModel
+}
+
+// Hotzone is one clickable region in window-local DIPs. Preset names an
+// interaction sequence from the pack; Action is the fallback when that
+// preset has no steps.
+type Hotzone struct {
+	ID     string
+	Label  string
+	Preset string
+	Action string
+	Rect   ui.Rect
 }
 
 // MenuActions are the application-level actions offered by the pet's
@@ -188,6 +202,104 @@ func (m *Model) React(reaction Reaction) {
 		m.onReaction(reaction)
 	}
 	m.invalidate()
+}
+
+// TriggerHotzone starts the preset attached to a clickable region. Bubble
+// and sound follow the preset's bubble behavior; animation uses its step
+// sequence (or the region's action when the preset has no steps).
+func (m *Model) TriggerHotzone(id string) {
+	var zone Hotzone
+	found := false
+	for _, candidate := range m.Hotzones() {
+		if candidate.ID == id {
+			zone = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return
+	}
+	m.triggerPreset(zone.Preset, zone.Action, ReactionFace)
+}
+
+// TriggerPreset is the menu-facing entry for a named interaction preset.
+// When the artwork has no such preset, the static reaction still runs.
+func (m *Model) TriggerPreset(id string, fallback Reaction) {
+	m.triggerPreset(id, "", fallback)
+}
+
+func (m *Model) triggerPreset(presetID, action string, fallback Reaction) {
+	if presetID == "" {
+		presetID = "tap"
+	}
+	var preset petpack.Preset
+	if m.animated != nil {
+		preset, _ = m.animated.pack.Preset(presetID)
+	} else {
+		preset = defaultStaticPreset(presetID)
+	}
+	reaction := reactionForPreset(presetID, preset)
+	bubbleReaction := bubbleReactionForPreset(presetID, preset)
+	m.reaction = reaction
+	m.tapReady = true
+	m.interacted = true
+	if m.animated != nil {
+		if !m.animated.requestPreset(presetID, action) {
+			m.animated.requestReaction(fallback)
+		}
+	}
+	if bubbleReaction != ReactionNone && m.onReaction != nil {
+		m.onReaction(bubbleReaction)
+	}
+	m.invalidate()
+}
+
+func defaultStaticPreset(id string) petpack.Preset {
+	switch id {
+	case "pat":
+		return petpack.Preset{Reaction: "pat", Bubble: "pat"}
+	default:
+		return petpack.Preset{Reaction: "face", Bubble: "face"}
+	}
+}
+
+func reactionForPreset(id string, preset petpack.Preset) Reaction {
+	switch preset.Reaction {
+	case "face":
+		return ReactionFace
+	case "pat":
+		return ReactionHeadPat
+	case "none":
+		return ReactionNone
+	}
+	return fallbackReaction(id)
+}
+
+func bubbleReactionForPreset(id string, preset petpack.Preset) Reaction {
+	switch preset.Bubble {
+	case "face":
+		return ReactionFace
+	case "pat":
+		return ReactionHeadPat
+	case "none":
+		return ReactionNone
+	}
+	if preset.Reaction != "" {
+		return reactionForPreset(id, preset)
+	}
+	return fallbackReaction(id)
+}
+
+func fallbackReaction(id string) Reaction {
+	switch id {
+	case "pat":
+		return ReactionHeadPat
+	case "tap":
+		return ReactionFace
+	default:
+		return ReactionNone
+	}
 }
 
 // Animated reports whether the model is backed by an imported animation
@@ -275,7 +387,7 @@ func (m *Model) View(c *ui.Context) {
 	outer := ui.Box(c).Fill().DragWindow()
 	outer.ContextMenu(func(menu *ui.Menu) {
 		if menu.Item("摸摸头").Chosen() {
-			m.React(ReactionHeadPat)
+			m.TriggerPreset("pat", ReactionHeadPat)
 		}
 		if m.animated != nil && m.animated.canPlayActions() {
 			if actions := m.animated.onceActions(); len(actions) > 0 {
@@ -327,12 +439,15 @@ func (m *Model) View(c *ui.Context) {
 			})
 		}
 		if m.animated == nil || m.animated.faceClickable(m.dragging) {
-			ui.Box(c).Absolute().
-				Left(m.faceRegion.X).Top(m.faceRegion.Y).
-				Size(m.faceRegion.W, m.faceRegion.H).
-				Label("摸摸脸").
-				Cursor(ui.CursorPointer).
-				OnClick(func() { m.React(ReactionFace) })
+			for _, zone := range m.Hotzones() {
+				zone := zone
+				ui.Box(c).Absolute().
+					Left(zone.Rect.X).Top(zone.Rect.Y).
+					Size(zone.Rect.W, zone.Rect.H).
+					Label(zone.Label).
+					Cursor(ui.CursorPointer).
+					OnClick(func() { m.TriggerHotzone(zone.ID) })
+			}
 		}
 	})
 

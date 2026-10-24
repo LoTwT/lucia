@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -115,5 +116,79 @@ func TestLoadDamagedFileFallsBackToDefaults(t *testing.T) {
 	}
 	if !got.PetVisible {
 		t.Error("a damaged file must apply the pet visibility default")
+	}
+}
+
+func TestStoreUpdatePreservesFieldsOwnedElsewhere(t *testing.T) {
+	dir := t.TempDir()
+	initial := Default()
+	initial.PetPack = "naiwa"
+	initial.PetIntroPlayed = true
+	store := NewStore(dir, initial)
+
+	got, err := store.Update(func(s *Settings) {
+		s.SoundEnabled = true
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !got.SoundEnabled || got.PetPack != "naiwa" || !got.PetIntroPlayed {
+		t.Fatalf("updated settings = %+v, want sound with pack and intro preserved", got)
+	}
+	persisted, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !persisted.SoundEnabled || persisted.PetPack != "naiwa" || !persisted.PetIntroPlayed {
+		t.Fatalf("persisted settings = %+v", persisted)
+	}
+}
+
+func TestStoreConcurrentUpdatesDoNotLoseFields(t *testing.T) {
+	store := NewStore(t.TempDir(), Default())
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := store.Update(func(s *Settings) {
+				switch i % 4 {
+				case 0:
+					s.SoundEnabled = true
+				case 1:
+					s.BubbleCooldownSeconds = 30
+				case 2:
+					s.PetScale = 1.25
+				case 3:
+					s.CheckUpdatesOnLaunch = false
+				}
+			})
+			if err != nil {
+				t.Errorf("Update: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	got := store.Snapshot()
+	if !got.SoundEnabled || got.BubbleCooldownSeconds != 30 || got.PetScale != 1.25 || got.CheckUpdatesOnLaunch {
+		t.Fatalf("settings after concurrent updates = %+v", got)
+	}
+}
+
+func TestStoreFailedSaveKeepsCurrent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(dir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(dir, Default())
+	got, err := store.Update(func(s *Settings) { s.SoundEnabled = true })
+	if err == nil {
+		t.Fatal("Update succeeded with an unusable directory")
+	}
+	if got.SoundEnabled {
+		t.Fatalf("failed update returned mutated settings: %+v", got)
+	}
+	if store.Snapshot().SoundEnabled {
+		t.Fatalf("failed update mutated the in-memory settings")
 	}
 }
