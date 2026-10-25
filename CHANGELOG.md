@@ -13,6 +13,7 @@
 - 素材包 schema 2：支持命名热区、交互 preset 动作序列与动作级停留时序；schema 1 自动升级。新增 `packs.lock.json`、`packs.pending.json` 与启动恢复，导入中断可回滚。
 - 设置写入改为进程内单一 Store，控制台保存不再覆盖 `petPack`/`petIntroPlayed`；`cmd/petpack` 新增 `-check <dir> -strict`。
 - 根据独立 review 加固素材包流程：strict 检查原始 schema、拒绝循环热区动作、解码失败自动回到 idle、preset 首步延迟且等待时保留 idle、Windows 保留名校验、替换 active 失败回退内置鲸鱼、Store active/删除/预览边界修复，并补充替换回滚、损坏元数据与中断路径测试。
+- 控制台的“选择 zip 文件”和删除确认改为异步打开原生对话框，避免阻塞 UI 线程导致整个窗口卡死。
 
 ## 0.0.1-rc.2
 
