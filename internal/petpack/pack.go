@@ -144,6 +144,24 @@ type Events struct {
 	UpdateFailed   string `json:"update.failed,omitempty"`
 }
 
+// Action returns the action mapped to an application event, or "".
+func (e Events) Action(name string) string {
+	switch name {
+	case "intro":
+		return e.Intro
+	case "activate":
+		return e.Activate
+	case "reset":
+		return e.Reset
+	case "update.checking":
+		return e.UpdateChecking
+	case "update.failed":
+		return e.UpdateFailed
+	default:
+		return ""
+	}
+}
+
 // Manifest is the single pack.json schema. There are no version branches:
 // every pack must declare schema 1 and the current structure.
 type Manifest struct {

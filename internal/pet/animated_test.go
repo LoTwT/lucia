@@ -286,7 +286,7 @@ func TestAnimatedQueuesActionBehindIntro(t *testing.T) {
 func TestAnimatedBackgroundActionDoesNotWakeSleepingPet(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	m.animated.asleep = true
-	m.PlayBackgroundAction("think")
+	m.TriggerBackgroundEvent("update.checking")
 	if m.animated.pendingOnce != "" {
 		t.Fatalf("pendingOnce = %q, want empty while asleep", m.animated.pendingOnce)
 	}

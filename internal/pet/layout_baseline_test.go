@@ -50,10 +50,7 @@ func TestWhaleLayoutBaseline(t *testing.T) {
 		},
 	}
 	for _, want := range want {
-		m, err := New()
-		if err != nil {
-			t.Fatal(err)
-		}
+		m := newBuiltinPet(t)
 		m.SetScale(want.scale)
 		windowW, windowH := m.WindowSize()
 		if windowW != want.windowW || windowH != want.windowH {
@@ -64,7 +61,6 @@ func TestWhaleLayoutBaseline(t *testing.T) {
 			t.Errorf("scale %.2f sprite = %dx%d, want %dx%d", want.scale, spriteW, spriteH, want.spriteW, want.spriteH)
 		}
 		assertRectClose(t, "image", m.ImageRect(), want.image)
-		assertRectClose(t, "face", m.FaceRegion(), want.face)
 		assertRectClose(t, "bubble", m.BubbleRect(), want.bubble)
 		zones := m.Hotzones()
 		if len(zones) != want.hotzones {

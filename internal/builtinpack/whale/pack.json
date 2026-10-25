@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "id": "lucia-whale",
+  "name": "鲸鱼",
+  "license": {
+    "status": "CC BY-NC-SA 4.0",
+    "note": "非官方同人素材；完整来源与使用条件见同目录 NOTICE.md。"
+  },
+  "canvas": { "width": 800, "height": 800 },
+  "crop": { "x": 0, "y": 0, "width": 800, "height": 800 },
+  "base": {
+    "window": { "width": 248, "height": 248 },
+    "sprite": { "width": 240, "height": 240 },
+    "margin": 4
+  },
+  "bubbleAnchor": { "x": 0.5, "y": 0 },
+  "clips": {
+    "idle_loop": { "file": "clips/idle_loop.webp", "frames": 4, "loop": true }
+  },
+  "actions": {
+    "idle": {
+      "label": "待机",
+      "loop": "idle_loop",
+      "poster": "idle_loop#0",
+      "loopCount": -1,
+      "interruptible": true
+    },
+    "drowsy": {
+      "label": "困倦",
+      "poster": "idle_loop#1"
+    },
+    "asleep": {
+      "label": "睡着",
+      "poster": "idle_loop#2"
+    }
+  },
+  "states": {
+    "idle": "idle",
+    "drowsy": "drowsy",
+    "asleep": "asleep"
+  },
+  "hotzones": [
+    {
+      "id": "face",
+      "label": "摸摸脸",
+      "rect": {
+        "x": 0.3083333333333333,
+        "y": 0.45,
+        "width": 0.4166666666666667,
+        "height": 0.31666666666666665
+      },
+      "interaction": "poke"
+    }
+  ],
+  "interactions": {
+    "poke": {
+      "label": "摸摸脸",
+      "bubble": "face",
+      "sound": true,
+      "motion": "squash",
+      "reducedPoster": "idle_loop#2"
+    },
+    "pat": {
+      "label": "摸摸头",
+      "bubble": "pat",
+      "sound": true,
+      "motion": "lift",
+      "reducedPoster": "idle_loop#1"
+    }
+  },
+  "bubbles": {
+    "face": [
+      "别戳脸啦……",
+      "唔，被发现了。",
+      "再戳要生气了。",
+      "脸都被你戳扁了。"
+    ],
+    "pat": [
+      "摸头……还行吧。",
+      "哼，才没有很开心。",
+      "再摸一下也可以。",
+      "头发要乱啦。"
+    ]
+  },
+  "menu": [
+    { "interaction": "pat" }
+  ],
+  "idleMotion": "bob"
+}

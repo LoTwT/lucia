@@ -167,37 +167,5 @@ func matchingDisplay(win Rect, displays []Display) Display {
 	return best
 }
 
-// BubbleLine returns the next line for a reaction. Lines cycle; an unknown
-// reaction yields an empty string so callers can show nothing.
-func BubbleLine(reaction Reaction, n int) string {
-	var lines []string
-	switch reaction {
-	case ReactionFace:
-		lines = faceLines
-	case ReactionHeadPat:
-		lines = headPatLines
-	default:
-		return ""
-	}
-	if n < 0 {
-		n = 0
-	}
-	return lines[n%len(lines)]
-}
-
-var faceLines = []string{
-	"别戳脸啦……",
-	"唔，被发现了。",
-	"再戳要生气了。",
-	"脸都被你戳扁了。",
-}
-
-var headPatLines = []string{
-	"摸头……还行吧。",
-	"哼，才没有很开心。",
-	"再摸一下也可以。",
-	"头发要乱啦。",
-}
-
 // BubbleLineDelay is the default time a line stays on screen.
 const BubbleLineDelay = 2600 * time.Millisecond

@@ -213,17 +213,6 @@ func NewAnimated(pack *petpack.Pack) (*Model, error) {
 			Height: pack.Manifest.Base.Sprite.Height,
 		},
 	}
-	for _, zone := range pack.Manifest.Hotzones {
-		if zone.ID == "face" || layout.Face.Width == 0 {
-			layout.Face.X = zone.Rect.X
-			layout.Face.Y = zone.Rect.Y
-			layout.Face.Width = zone.Rect.Width
-			layout.Face.Height = zone.Rect.Height
-			if zone.ID == "face" {
-				break
-			}
-		}
-	}
 	m := &Model{
 		layout:         layout,
 		scale:          defaultScale,
@@ -233,6 +222,7 @@ func NewAnimated(pack *petpack.Pack) (*Model, error) {
 	}
 	if m.bubbleAnchorX == 0 && m.bubbleAnchorY == 0 {
 		m.bubbleAnchorX = 0.5
+		m.bubbleAnchorY = 0.05
 	}
 	m.applyLayout()
 	animated, err := newAnimatedModel(pack)
@@ -569,20 +559,41 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 		a.enterAsleep(now)
 		return
 	}
-	if activity == ActivityDrowsy && !a.drowsyPlayed &&
-		(a.current == nil || a.current.actionID == idleID) {
-		a.drowsyPlayed = true
-		if id := a.pack.Manifest.States.Drowsy; id != "" {
-			if a.startAction(id, now) {
+	if activity == ActivityDrowsy {
+		drowsyID := a.pack.Manifest.States.Drowsy
+		if !a.drowsyPlayed && (a.current == nil || a.current.actionID == idleID) {
+			a.drowsyPlayed = true
+			if drowsyID != "" && a.startAction(drowsyID, now) {
 				a.advance(now)
 				return
 			}
+		}
+		if drowsyID != "" && (a.current == nil || a.current.actionID == idleID) &&
+			a.holdStatePoster(drowsyID) {
+			return
 		}
 	}
 	if a.current == nil {
 		a.startIdle(now)
 	}
 	a.advance(now)
+}
+
+// holdStatePoster displays an action's poster without playing a clip. Drowsy
+// and asleep states use this when a pack only declares a static pose.
+func (a *animatedModel) holdStatePoster(actionID string) bool {
+	action, ok := a.pack.Action(actionID)
+	if !ok || action.Poster == "" {
+		return false
+	}
+	if a.current != nil {
+		if a.current.provider != nil {
+			a.current.provider.Close()
+		}
+		a.current = nil
+	}
+	a.restPoster = a.posterFor(actionID)
+	return a.restPoster != nil
 }
 
 func (a *animatedModel) enterAsleep(now time.Time) {

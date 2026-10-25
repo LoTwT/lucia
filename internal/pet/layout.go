@@ -1,9 +1,6 @@
 package pet
 
 import (
-	_ "embed"
-	"encoding/json"
-	"fmt"
 	"math"
 
 	"github.com/egoist/mygo/ui"
@@ -15,79 +12,19 @@ const (
 	maxScale     = 2.5
 )
 
-//go:embed assets/deepseek-whale/layout.json
-var layoutJSON []byte
-
-// dimension is one edge length in the legacy integer form or explicit
-// width/height form. The legacy form keeps existing artwork layouts valid
-// while rectangular skins describe both edges.
+// dimension is one edge length in the pack's base units.
 type dimension struct {
-	Width  int `json:"width"`
-	Height int `json:"height"`
+	Width  int
+	Height int
 }
 
-func (d *dimension) UnmarshalJSON(data []byte) error {
-	var edge int
-	if err := json.Unmarshal(data, &edge); err == nil {
-		d.Width, d.Height = edge, edge
-		return nil
-	}
-	var value struct {
-		Width  int `json:"width"`
-		Height int `json:"height"`
-		W      int `json:"w"`
-		H      int `json:"h"`
-	}
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	d.Width = value.Width
-	d.Height = value.Height
-	if d.Width == 0 {
-		d.Width = value.W
-	}
-	if d.Height == 0 {
-		d.Height = value.H
-	}
-	return nil
-}
-
-// assetLayout describes one artwork's canvas and how the character sits in
-// its window. Face coordinates are normalized to the sprite rectangle, so
-// scaling the window and sprite never needs new hard-coded click regions.
+// assetLayout describes one pack's canvas and how the character sits in its
+// window. Hotzones are normalized to the cropped artwork, so scaling never
+// needs new hard-coded click regions.
 type assetLayout struct {
-	Canvas dimension `json:"canvas"`
-	Window dimension `json:"window"`
-	Sprite dimension `json:"sprite"`
-	Face   struct {
-		X      float64 `json:"x"`
-		Y      float64 `json:"y"`
-		Width  float64 `json:"width"`
-		Height float64 `json:"height"`
-	} `json:"face"`
-}
-
-func loadLayout() (assetLayout, error) {
-	var layout assetLayout
-	if err := json.Unmarshal(layoutJSON, &layout); err != nil {
-		return assetLayout{}, fmt.Errorf("decode pet layout: %w", err)
-	}
-	if layout.Canvas.Width <= 0 || layout.Canvas.Height <= 0 ||
-		layout.Window.Width <= 0 || layout.Window.Height <= 0 ||
-		layout.Sprite.Width <= 0 || layout.Sprite.Height <= 0 {
-		return assetLayout{}, fmt.Errorf("pet layout has non-positive canvas, window, or sprite")
-	}
-	if layout.Sprite.Width > layout.Window.Width || layout.Sprite.Height > layout.Window.Height {
-		return assetLayout{}, fmt.Errorf("pet layout sprite %dx%d exceeds window %dx%d",
-			layout.Sprite.Width, layout.Sprite.Height, layout.Window.Width, layout.Window.Height)
-	}
-	face := layout.Face
-	if face.Width <= 0 || face.Height <= 0 ||
-		face.X < 0 || face.Y < 0 ||
-		face.X+face.Width > 1 || face.Y+face.Height > 1 {
-		return assetLayout{}, fmt.Errorf("pet layout face is not a normalized sub-rectangle")
-	}
-	return layout, nil
+	Canvas dimension
+	Window dimension
+	Sprite dimension
 }
 
 func (m *Model) applyLayout() {
@@ -99,7 +36,7 @@ func (m *Model) applyLayout() {
 	originY := float32(windowHeight-spriteHeight) / 2
 
 	// Artwork with a different aspect ratio is letterboxed inside the sprite
-	// box. Face and bubble coordinates follow the drawn image, not the box.
+	// box. Hotzones and the bubble anchor follow the drawn image, not the box.
 	imageScale := math.Min(
 		float64(spriteWidth)/float64(m.layout.Canvas.Width),
 		float64(spriteHeight)/float64(m.layout.Canvas.Height),
@@ -114,12 +51,6 @@ func (m *Model) applyLayout() {
 	m.spriteWidth = spriteWidth
 	m.spriteHeight = spriteHeight
 	m.imageRect = ui.Rect{X: imageX, Y: imageY, W: imageWidth, H: imageHeight}
-	m.faceRegion = ui.Rect{
-		X: imageX + float32(m.layout.Face.X*float64(imageWidth)),
-		Y: imageY + float32(m.layout.Face.Y*float64(imageHeight)),
-		W: float32(m.layout.Face.Width * float64(imageWidth)),
-		H: float32(m.layout.Face.Height * float64(imageHeight)),
-	}
 	anchorX := imageX + float32(m.bubbleAnchorX*float64(imageWidth))
 	anchorY := imageY + float32(m.bubbleAnchorY*float64(imageHeight))
 	m.bubbleRect = ui.Rect{
@@ -171,22 +102,10 @@ func (m *Model) WindowSize() (width, height int) { return m.windowWidth, m.windo
 // SpriteSize returns the edge lengths of the drawn sprite in DIPs.
 func (m *Model) SpriteSize() (width, height int) { return m.spriteWidth, m.spriteHeight }
 
-// FaceRegion returns the clickable face rectangle in window DIPs. It is kept
-// for callers that predate named hotzones; new code should use Hotzones.
-func (m *Model) FaceRegion() ui.Rect { return m.faceRegion }
-
-// Hotzones returns the clickable regions in window DIPs. The static pet has
-// one legacy face zone so both artwork paths use the same click wiring.
+// Hotzones returns the clickable regions in window DIPs. The slice is copied
+// so callers cannot mutate the model's layout.
 func (m *Model) Hotzones() []Hotzone {
-	if len(m.hotzones) > 0 {
-		return append([]Hotzone(nil), m.hotzones...)
-	}
-	if m.faceRegion.W <= 0 || m.faceRegion.H <= 0 {
-		return nil
-	}
-	return []Hotzone{{
-		ID: "face", Label: "摸摸脸", Interaction: "poke", Rect: m.faceRegion,
-	}}
+	return append([]Hotzone(nil), m.hotzones...)
 }
 
 // ImageRect returns the drawn artwork rectangle in window DIPs. The sprite

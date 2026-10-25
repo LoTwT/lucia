@@ -6,21 +6,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestBubbleLineCyclesByReaction(t *testing.T) {
-	if got := BubbleLine(ReactionFace, 0); got != faceLines[0] {
-		t.Fatalf("face line 0 = %q, want %q", got, faceLines[0])
-	}
-	if got := BubbleLine(ReactionFace, len(faceLines)); got != faceLines[0] {
-		t.Fatalf("face line wrapped = %q, want %q", got, faceLines[0])
-	}
-	if got := BubbleLine(ReactionHeadPat, 1); got != headPatLines[1] {
-		t.Fatalf("head-pat line 1 = %q, want %q", got, headPatLines[1])
-	}
-	if got := BubbleLine(ReactionNone, 0); got != "" {
-		t.Fatalf("unknown reaction line = %q, want empty", got)
-	}
-}
-
 func TestBubbleViewShowsText(t *testing.T) {
 	m := &BubbleModel{}
 	m.SetContent("别戳脸啦……", BubbleAbove, BubbleWidth/2)
