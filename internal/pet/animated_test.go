@@ -170,6 +170,24 @@ func TestAnimatedPokeChainsToIdle(t *testing.T) {
 	}
 }
 
+func TestTriggerEventUsesManifestMapping(t *testing.T) {
+	m, _ := newTinyAnimatedModel(t)
+	tt := ui.NewTester(m.View, 20, 20)
+	tt.Frame()
+	if !m.HasEvent("intro") || !m.HasEvent("update.checking") {
+		t.Fatal("expected pack events are missing")
+	}
+	m.TriggerEvent("update.checking")
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "think" {
+		t.Fatalf("current = %+v, want think", m.animated.current)
+	}
+	m.TriggerEvent("missing")
+	if m.animated.pendingOnce != "" {
+		t.Fatalf("unknown event queued %q", m.animated.pendingOnce)
+	}
+}
+
 func TestFiniteDrowsyReturnsToIdle(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	width, height := m.WindowSize()

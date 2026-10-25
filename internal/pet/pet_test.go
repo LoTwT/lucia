@@ -124,6 +124,29 @@ func TestInteractionWakesForNextFrame(t *testing.T) {
 	}
 }
 
+func TestAnimatedMotionFollowsDeclaration(t *testing.T) {
+	now := time.Now()
+	_, squash, lift := animatedMotion(false, 0, "none", "squash", now.Add(-tapDuration/2), now)
+	if squash <= 0 || lift != 0 {
+		t.Fatalf("squash = %v, lift = %v, want squash only", squash, lift)
+	}
+	_, squash, lift = animatedMotion(false, 0, "none", "lift", now.Add(-headPatDuration/2), now)
+	if squash <= 0 || lift >= 0 {
+		t.Fatalf("squash = %v, lift = %v, want squash and an upward lift", squash, lift)
+	}
+	bob, squash, lift := animatedMotion(true, bobPeriod/4, "bob", "squash", now, now)
+	if bob != 0 || squash != 0 || lift != 0 {
+		t.Fatalf("reduce-motion transforms = (%v, %v, %v), want zeros", bob, squash, lift)
+	}
+}
+
+func TestBuiltinPackDeclaresNoHostIntro(t *testing.T) {
+	m := newBuiltinPet(t)
+	if m.HasEvent("intro") || m.HasEvent("activate") {
+		t.Fatal("built-in pack must not consume the first-run intro")
+	}
+}
+
 func TestTapAmount(t *testing.T) {
 	tests := []struct {
 		name    string
