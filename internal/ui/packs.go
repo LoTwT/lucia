@@ -157,7 +157,7 @@ func (m *Model) packRow(c *ui.Context, pack PackSummary) {
 }
 
 func (m *Model) packImportPanel(c *ui.Context) {
-	if m.cfg.ChoosePackZip == nil || m.cfg.ImportPack == nil {
+	if (m.cfg.ChoosePackZip == nil && m.cfg.ChoosePackZipAsync == nil) || m.cfg.ImportPack == nil {
 		return
 	}
 	t := c.Theme()
@@ -171,16 +171,8 @@ func (m *Model) packImportPanel(c *ui.Context) {
 			}
 			ui.Text(c, zipLabel).FontSize(12).Grow(1).SingleLine().Selectable().
 				Tooltip(zipLabel).TextColor(t.TextMuted)
-			if ui.Button(c, "选择 zip…").Clicked() {
-				path, err := m.cfg.ChoosePackZip()
-				if err != nil {
-					m.packActionErr = fmt.Sprintf("选择素材包失败：%v", err)
-				} else if path != "" {
-					m.packZip = path
-					m.packLicense = false
-					m.packActionErr = ""
-					m.packNotice = ""
-				}
+			if ui.Button(c, "选择 zip 文件").Disabled(m.packBusy).Clicked() {
+				m.choosePackZip()
 			}
 		})
 		ui.Checkbox(c, &m.packLicense, "我确认拥有该素材包的本地使用授权，且不会再分发其中的美术资源").
@@ -190,12 +182,15 @@ func (m *Model) packImportPanel(c *ui.Context) {
 				Label("替换同名素材包")
 		}
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			if ui.PrimaryButton(c, "导入并启用").Disabled(m.packZip == "" || !m.packLicense).Clicked() {
+			if ui.PrimaryButton(c, "导入并启用").Disabled(m.packBusy || m.packZip == "" || !m.packLicense).Clicked() {
 				m.importPack()
 			}
 			ui.Text(c, "导入过程中窗口可能短暂卡顿；完成后素材包立即生效。").
 				FontSize(11).TextColor(t.TextMuted)
 		})
+		if m.packBusy {
+			ui.Text(c, "正在等待系统对话框…").FontSize(12).TextColor(t.TextMuted)
+		}
 		if m.packNotice != "" {
 			ui.Text(c, m.packNotice).FontSize(12).TextColor(t.Success).Selectable()
 		}
@@ -380,6 +375,65 @@ func (m *Model) loadPackPreview() {
 	}
 	m.packPreview = bitmap
 	m.packPreviewW, m.packPreviewH = bitmap.Size()
+}
+
+func (m *Model) choosePackZip() {
+	if m.packBusy {
+		return
+	}
+	if m.cfg.ChoosePackZipAsync != nil {
+		m.packBusy = true
+		m.packActionErr = ""
+		m.cfg.ChoosePackZipAsync(func(path string, err error) {
+			m.packBusy = false
+			if err != nil {
+				m.packActionErr = fmt.Sprintf("选择素材包失败：%v", err)
+				return
+			}
+			if path == "" {
+				return
+			}
+			m.packZip = path
+			m.packLicense = false
+			m.packActionErr = ""
+			m.packNotice = ""
+		})
+		return
+	}
+	if m.cfg.ChoosePackZip == nil {
+		return
+	}
+	path, err := m.cfg.ChoosePackZip()
+	if err != nil {
+		m.packActionErr = fmt.Sprintf("选择素材包失败：%v", err)
+		return
+	}
+	if path == "" {
+		return
+	}
+	m.packZip = path
+	m.packLicense = false
+	m.packActionErr = ""
+	m.packNotice = ""
+}
+
+func (m *Model) confirmDeletePack(id, name string) {
+	if m.packBusy {
+		return
+	}
+	if m.cfg.ConfirmDeletePackAsync != nil {
+		m.packBusy = true
+		m.cfg.ConfirmDeletePackAsync(id, name, func(ok bool) {
+			m.packBusy = false
+			if ok {
+				m.deletePack(id)
+			}
+		})
+		return
+	}
+	if m.cfg.ConfirmDeletePack == nil || m.cfg.ConfirmDeletePack(id, name) {
+		m.deletePack(id)
+	}
 }
 
 func (m *Model) importPack() {

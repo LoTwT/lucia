@@ -52,8 +52,13 @@ type Config struct {
 	// controls that depend on it.
 	LoadPacks func() ([]PackSummary, error)
 	// ChoosePackZip asks the user for a pack zip and returns its path, or ""
-	// when canceled. Nil hides the import form.
+	// when canceled. Nil hides the import form unless ChoosePackZipAsync is
+	// set. Tests and embedded hosts can use this synchronous form.
 	ChoosePackZip func() (string, error)
+	// ChoosePackZipAsync is the UI-safe native dialog form. done must be called
+	// on the UI thread; the application wraps the native dialog in a goroutine
+	// and posts the result back through Window.Update.
+	ChoosePackZipAsync func(done func(path string, err error))
 	// ImportPack installs a zip. It must not activate the pack; the console
 	// calls ActivatePack after a successful import.
 	ImportPack func(zipPath string, acceptLicense bool) (PackSummary, error)
@@ -66,6 +71,9 @@ type Config struct {
 	DeletePack func(id string) error
 	// ConfirmDeletePack asks before deleting. Nil means no confirmation.
 	ConfirmDeletePack func(id, name string) bool
+	// ConfirmDeletePackAsync is the UI-safe native dialog form. done must be
+	// called on the UI thread.
+	ConfirmDeletePackAsync func(id, name string, done func(bool))
 	// LoadPackPreview returns a PNG poster for a pack.
 	LoadPackPreview func(id string) ([]byte, error)
 	// OpenPacksDir opens the install directory.
@@ -103,6 +111,7 @@ type Model struct {
 	packZip        string
 	packLicense    bool
 	packReplace    bool
+	packBusy       bool
 	packPreview    *ui.Bitmap
 	packPreviewID  string
 	packPreviewW   int

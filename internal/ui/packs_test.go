@@ -80,6 +80,44 @@ func newPacksTestModel(t *testing.T, packs []PackSummary) (*Model, *int, *int) {
 	return model, &imports, &activations
 }
 
+func TestChoosePackZipAsyncUpdatesModel(t *testing.T) {
+	model := New(Config{
+		Version:  "0.0.1",
+		DataDir:  "/tmp/lucia",
+		Updates:  updates.New(disabledSource{}, "0.0.1"),
+		Settings: settings.Default(),
+		ChoosePackZipAsync: func(done func(string, error)) {
+			done("/tmp/tiny.zip", nil)
+		},
+	})
+	model.choosePackZip()
+	if model.packZip != "/tmp/tiny.zip" || model.packBusy {
+		t.Fatalf("zip=%q busy=%v", model.packZip, model.packBusy)
+	}
+}
+
+func TestConfirmDeletePackAsyncDeletes(t *testing.T) {
+	deleteCalls := 0
+	model := New(Config{
+		Version:   "0.0.1",
+		DataDir:   "/tmp/lucia",
+		Updates:   updates.New(disabledSource{}, "0.0.1"),
+		Settings:  settings.Default(),
+		LoadPacks: func() ([]PackSummary, error) { return nil, nil },
+		DeletePack: func(string) error {
+			deleteCalls++
+			return nil
+		},
+		ConfirmDeletePackAsync: func(id, name string, done func(bool)) {
+			done(true)
+		},
+	})
+	model.confirmDeletePack("tiny", "Tiny")
+	if deleteCalls != 1 || model.packBusy {
+		t.Fatalf("deleteCalls=%d busy=%v", deleteCalls, model.packBusy)
+	}
+}
+
 func TestPacksPageShowsMetadataPreviewAndHotzones(t *testing.T) {
 	model, _, _ := newPacksTestModel(t, []PackSummary{testPack(true)})
 	tt := ui.NewTester(model.View, 1000, 700)

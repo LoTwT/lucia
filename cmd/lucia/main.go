@@ -158,20 +158,27 @@ func main() {
 			}
 			return out, nil
 		},
-		ChoosePackZip: func() (string, error) {
-			paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-				Parent:  win,
-				Title:   "选择素材包",
-				Message: "选择包含透明动画 WebP 的 zip",
-				Filters: []mygo.FileFilter{{Name: "素材包", Extensions: []string{"zip"}}},
-			})
-			if err != nil {
-				return "", err
-			}
-			if len(paths) == 0 {
-				return "", nil
-			}
-			return paths[0], nil
+		ChoosePackZipAsync: func(done func(string, error)) {
+			// Dialog.Open posts the native panel to the main loop and waits.
+			// Calling it on the UI thread would block that loop; keep the
+			// dialog in a goroutine and return the result through Update.
+			parent := win
+			go func() {
+				paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+					Parent:  parent,
+					Title:   "选择素材包",
+					Message: "选择包含透明动画 WebP 的 zip",
+					Filters: []mygo.FileFilter{{Name: "素材包", Extensions: []string{"zip"}}},
+				})
+				path := ""
+				if len(paths) > 0 {
+					path = paths[0]
+				}
+				if parent == nil || parent.IsDestroyed() {
+					return
+				}
+				parent.Update(func() { done(path, err) })
+			}()
 		},
 		ImportPack: func(zipPath string, acceptLicense bool) (appui.PackSummary, error) {
 			summary, err := packStore.Import(zipPath, acceptLicense)
@@ -194,18 +201,25 @@ func main() {
 			return activatePetPack(id)
 		},
 		DeletePack: func(id string) error { return packStore.Delete(id) },
-		ConfirmDeletePack: func(id, name string) bool {
-			res, err := mygo.Dialog.Message(mygo.MessageOptions{
-				Parent:        win,
-				Type:          mygo.MessageWarning,
-				Title:         "删除素材包",
-				Message:       fmt.Sprintf("删除“%s”（%s）？", name, id),
-				Detail:        "只会删除本机数据目录中的素材包，不会影响内置鲸鱼。",
-				Buttons:       []string{"删除", "取消"},
-				DefaultButton: 1,
-				CancelButton:  1,
-			})
-			return err == nil && res.Button == 0
+		ConfirmDeletePackAsync: func(id, name string, done func(bool)) {
+			// Dialog.Message has the same main-loop contract as Open.
+			parent := win
+			go func() {
+				res, err := mygo.Dialog.Message(mygo.MessageOptions{
+					Parent:        parent,
+					Type:          mygo.MessageWarning,
+					Title:         "删除素材包",
+					Message:       fmt.Sprintf("删除“%s”（%s）？", name, id),
+					Detail:        "只会删除本机数据目录中的素材包，不会影响内置鲸鱼。",
+					Buttons:       []string{"删除", "取消"},
+					DefaultButton: 1,
+					CancelButton:  1,
+				})
+				if parent == nil || parent.IsDestroyed() {
+					return
+				}
+				parent.Update(func() { done(err == nil && res.Button == 0) })
+			}()
 		},
 		LoadPackPreview: func(id string) ([]byte, error) { return packStore.Preview(id) },
 		OpenPacksDir: func() error {
