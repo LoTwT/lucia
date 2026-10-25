@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	animatedReduceMotionReaction = 1200 * time.Millisecond
+	animatedReduceMotionFeedback = 1200 * time.Millisecond
 	// animatedResetGap is longer than the longest authored frame (1083 ms)
 	// but short enough that a suspended window does not decode a long
 	// backlog of frames when it becomes visible again.
@@ -788,7 +788,7 @@ func (a *animatedModel) bitmapFor(img image.Image) *ui.Bitmap {
 func (a *animatedModel) nextDelay(now time.Time, activity Activity, idle time.Duration, interactionAt time.Time, reduceMotion bool) time.Duration {
 	if reduceMotion {
 		if a.reactionActive(now, interactionAt) {
-			return max(animatedReduceMotionReaction-now.Sub(interactionAt), time.Millisecond)
+			return max(animatedReduceMotionFeedback-now.Sub(interactionAt), time.Millisecond)
 		}
 		switch activity {
 		case ActivityAsleep:
@@ -867,7 +867,7 @@ func (a *animatedModel) idleMotionBob() bool {
 }
 
 func (a *animatedModel) reactionActive(now, reactionAt time.Time) bool {
-	return !reactionAt.IsZero() && now.Sub(reactionAt) < animatedReduceMotionReaction
+	return !reactionAt.IsZero() && now.Sub(reactionAt) < animatedReduceMotionFeedback
 }
 
 func (a *animatedModel) hotzonesClickable(dragging bool) bool {
@@ -886,7 +886,7 @@ func (a *animatedModel) reducedImage(activity Activity, dragging bool, interacti
 			return poster
 		}
 	}
-	if interactionID != "" && !interactionAt.IsZero() && now.Sub(interactionAt) < animatedReduceMotionReaction {
+	if interactionID != "" && !interactionAt.IsZero() && now.Sub(interactionAt) < animatedReduceMotionFeedback {
 		if interaction, ok := a.pack.Interaction(interactionID); ok && interaction.ReducedPoster != "" {
 			if poster, err := a.pack.PosterFrame(interaction.ReducedPoster); err == nil {
 				return poster

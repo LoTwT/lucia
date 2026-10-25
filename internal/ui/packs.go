@@ -93,11 +93,6 @@ func (m *Model) packsPage(c *ui.Context) {
 				m.packActionErr = ""
 				m.refreshPacks()
 			}
-			if m.cfg.ActivatePack != nil && m.activePackID() != "" {
-				if ui.Button(c, "使用内置鲸鱼").Clicked() {
-					m.activatePack("")
-				}
-			}
 			if m.cfg.OpenPacksDir != nil && ui.Button(c, "打开目录").Clicked() {
 				if err := m.cfg.OpenPacksDir(); err != nil {
 					m.packActionErr = fmt.Sprintf("打开素材包目录失败：%v", err)
@@ -134,6 +129,9 @@ func (m *Model) packRow(c *ui.Context, pack PackSummary) {
 				ui.Row(c).AlignItems(ui.Center).Gap(7).Children(func() {
 					ui.Text(c, pack.Name).FontSize(14).Bold()
 					ui.Text(c, pack.ID).FontSize(11).TextColor(t.TextMuted)
+					if pack.Builtin {
+						ui.Badge(c, "内置")
+					}
 					if pack.Active {
 						ui.Badge(c, "使用中")
 					}
@@ -158,7 +156,7 @@ func (m *Model) packRow(c *ui.Context, pack PackSummary) {
 					m.activatePack(pack.ID)
 				}
 			}
-			if !pack.Active && m.cfg.DeletePack != nil {
+			if !pack.Active && !pack.Builtin && m.cfg.DeletePack != nil {
 				if ui.Button(c, "删除").Disabled(m.packBusy).Clicked() {
 					m.confirmDeletePack(pack.ID, pack.Name)
 				}
@@ -173,7 +171,7 @@ func (m *Model) packImportPanel(c *ui.Context) {
 	}
 	t := c.Theme()
 	panel(c, "导入素材包", func() {
-		ui.Text(c, "选择包含透明动画 WebP 的 zip。导入会先校验 manifest、全部帧和 SHA-256，失败时不会替换现有素材。").
+		ui.Text(c, "选择包含透明动画 WebP 的 zip。导入会先校验 manifest、全部帧和 SHA-256；仅在同名素材包已存在时询问是否替换。").
 			FontSize(13).TextColor(t.TextMuted).MaxWidth(700)
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
 			zipLabel := "未选择文件"

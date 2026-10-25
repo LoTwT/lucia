@@ -260,6 +260,12 @@ func (s *Store) List() ([]Summary, error) {
 	return summaries, nil
 }
 
+// SummaryFromManifest builds the console-facing description of a manifest.
+// It is used for installed packs and for the embedded built-in pack.
+func SummaryFromManifest(manifest Manifest, active bool) Summary {
+	return summaryFromManifest(manifest, active)
+}
+
 func summaryFromManifest(manifest Manifest, active bool) Summary {
 	var license struct {
 		Status string `json:"status"`
@@ -447,9 +453,15 @@ func (s *Store) Preview(id string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	action, ok := pack.Action(pack.Manifest.States.Idle)
+	return pack.PreviewPNG()
+}
+
+// PreviewPNG encodes the idle poster, or the first action with a poster, as
+// a PNG for the console.
+func (p *Pack) PreviewPNG() ([]byte, error) {
+	action, ok := p.Action(p.Manifest.States.Idle)
 	if !ok || action.Poster == "" {
-		for _, candidate := range sortedActions(pack.Manifest.Actions) {
+		for _, candidate := range sortedActions(p.Manifest.Actions) {
 			if candidate.Poster != "" {
 				action = candidate
 				ok = true
@@ -460,7 +472,7 @@ func (s *Store) Preview(id string) ([]byte, error) {
 	if !ok || action.Poster == "" {
 		return nil, errors.New("素材包没有可用作预览的海报帧")
 	}
-	img, err := pack.Poster(action)
+	img, err := p.Poster(action)
 	if err != nil {
 		return nil, err
 	}

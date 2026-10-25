@@ -9,7 +9,7 @@ import (
 
 func TestUIPackSummaryMapsInteractionData(t *testing.T) {
 	summary := petpack.Summary{
-		ID: "tiny", Name: "Tiny", Active: true, Valid: true,
+		ID: "tiny", Name: "Tiny", Active: true, Builtin: true, Valid: true,
 		Clips: 2, Frames: 6, Interactions: 1, License: "local-only",
 		InstalledAt: time.Date(2026, 10, 24, 12, 0, 0, 0, time.Local),
 		Hotzones: []petpack.HotzoneEntry{{
@@ -27,7 +27,7 @@ func TestUIPackSummaryMapsInteractionData(t *testing.T) {
 		}},
 	}
 	got := uiPackSummary(summary)
-	if got.Name != "Tiny" || !got.Active || len(got.Hotzones) != 1 {
+	if got.Name != "Tiny" || !got.Active || !got.Builtin || len(got.Hotzones) != 1 {
 		t.Fatalf("summary = %+v", got)
 	}
 	if got.Hotzones[0].Interaction != "poke" {

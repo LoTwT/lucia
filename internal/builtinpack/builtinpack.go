@@ -35,3 +35,15 @@ func Load(displayScale float64) (*petpack.Pack, error) {
 	}
 	return pack, nil
 }
+
+// Summary builds the console row for the embedded pack.
+func Summary(pack *petpack.Pack, active bool) petpack.Summary {
+	summary := petpack.SummaryFromManifest(pack.Manifest, active)
+	summary.Builtin = true
+	return summary
+}
+
+// Preview encodes the built-in pack's idle poster.
+func Preview(pack *petpack.Pack) ([]byte, error) {
+	return pack.PreviewPNG()
+}

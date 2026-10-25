@@ -82,6 +82,14 @@ func main() {
 	}
 	log.Printf("lucia: settings: check updates on launch=%v", prefs.CheckUpdatesOnLaunch)
 	settingsStore := settings.NewStore(paths.Data, prefs)
+	if petpack.IsReservedPackID(prefs.PetPack) {
+		updated, updateErr := settingsStore.Update(func(s *settings.Settings) { s.PetPack = "" })
+		if updateErr != nil {
+			log.Printf("lucia: normalize reserved pack id: %v", updateErr)
+		} else {
+			prefs = updated
+		}
+	}
 	packStore := petpack.NewStore(paths.Data, prefs.PetPack)
 	if err := packStore.Recover(); err != nil {
 		log.Printf("lucia: recover packs: %v", err)
@@ -93,7 +101,11 @@ func main() {
 	manager := updates.New(updates.MyGo{}, info.Version)
 	manager.SetAutoCheck(prefs.CheckUpdatesOnLaunch)
 
-	petModel, fellBack, err := newPetModel(paths.Data, prefs.PetPack)
+	builtinPetPack, err := builtinpack.Load(2)
+	if err != nil {
+		log.Fatalf("lucia: built-in pack: %v", err)
+	}
+	petModel, fellBack, err := newPetModel(paths.Data, prefs.PetPack, builtinPetPack)
 	if err != nil {
 		log.Fatalf("lucia: pet assets: %v", err)
 	}
@@ -155,7 +167,8 @@ func main() {
 			if err != nil {
 				return nil, err
 			}
-			out := make([]appui.PackSummary, 0, len(list))
+			out := make([]appui.PackSummary, 0, len(list)+1)
+			out = append(out, uiPackSummary(builtinpack.Summary(builtinPetPack, packStore.Active() == "")))
 			for _, summary := range list {
 				out = append(out, uiPackSummary(summary))
 			}
@@ -217,6 +230,9 @@ func main() {
 			if activatePetPack == nil {
 				return fmt.Errorf("应用尚未就绪")
 			}
+			if petpack.IsReservedPackID(id) {
+				id = ""
+			}
 			return activatePetPack(id)
 		},
 		DeletePack: func(id string) error { return packStore.Delete(id) },
@@ -240,7 +256,12 @@ func main() {
 				parent.Update(func() { done(err == nil && res.Button == 0) })
 			}()
 		},
-		LoadPackPreview: func(id string) ([]byte, error) { return packStore.Preview(id) },
+		LoadPackPreview: func(id string) ([]byte, error) {
+			if petpack.IsReservedPackID(id) {
+				return builtinpack.Preview(builtinPetPack)
+			}
+			return packStore.Preview(id)
+		},
 		OpenPacksDir: func() error {
 			if err := os.MkdirAll(packStore.PacksDir(), 0o755); err != nil {
 				return err
@@ -320,11 +341,7 @@ func main() {
 		var next *pet.Model
 		var err error
 		if id == "" {
-			pack, loadErr := builtinpack.Load(2)
-			if loadErr != nil {
-				return fmt.Errorf("加载内置素材包：%w", loadErr)
-			}
-			next, err = pet.NewAnimated(pack)
+			next, err = pet.NewAnimated(builtinPetPack)
 		} else {
 			pack, loadErr := petpack.Load(paths.Data, id, 2)
 			if loadErr != nil {
@@ -561,7 +578,7 @@ func updateUISettings(store *settings.Store, next settings.Settings) (settings.S
 // embedded whale when the pack is missing or invalid. A broken optional pack
 // must never keep the app from starting. The bool reports that the requested
 // pack was replaced by the built-in one.
-func newPetModel(dataDir, packID string) (*pet.Model, bool, error) {
+func newPetModel(dataDir, packID string, builtin *petpack.Pack) (*pet.Model, bool, error) {
 	fellBack := false
 	if packID != "" {
 		pack, err := petpack.Load(dataDir, packID, 2)
@@ -579,11 +596,7 @@ func newPetModel(dataDir, packID string) (*pet.Model, bool, error) {
 			}
 		}
 	}
-	pack, err := builtinpack.Load(2)
-	if err != nil {
-		return nil, fellBack, err
-	}
-	model, err := pet.NewAnimated(pack)
+	model, err := pet.NewAnimated(builtin)
 	if err != nil {
 		return nil, fellBack, err
 	}

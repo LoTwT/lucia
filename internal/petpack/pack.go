@@ -659,8 +659,8 @@ func IsReservedPackID(id string) bool {
 	return strings.EqualFold(id, BuiltinPackID)
 }
 
-// validPackDirID excludes names Windows reserves for devices. Preset and
-// hotzone ids do not become paths and intentionally still use validPackID.
+// validPackDirID excludes names Windows reserves for devices. Hotzone,
+// interaction and action ids do not become paths and still use validPackID.
 func validPackDirID(id string) bool {
 	return validPackID(id) && !windowsReservedPackID(id)
 }

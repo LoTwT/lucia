@@ -145,7 +145,7 @@ func TestAnimatedIdleProviderIsNilWhileCaching(t *testing.T) {
 	}
 }
 
-func TestAnimatedFaceReactionChainsToIdle(t *testing.T) {
+func TestAnimatedPokeChainsToIdle(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	width, height := m.WindowSize()
 	tt := ui.NewTester(m.View, width, height)

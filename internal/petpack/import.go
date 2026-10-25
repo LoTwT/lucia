@@ -48,7 +48,7 @@ type ImportOptions struct {
 // ImportZip converts an animated-WebP zip into packs/<id> and returns the
 // validated pack. The zip is never copied wholesale; only .webp clips are
 // extracted. A root pack.json or pack.meta.json supplies id, name, geometry,
-// actions, hotzones and presets; the ClipEntry list is rebuilt from the
+// actions, hotzones and interactions; the ClipEntry list is rebuilt from the
 // extracted files.
 func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	stage := func(name string) {

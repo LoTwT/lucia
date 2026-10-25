@@ -281,14 +281,29 @@ func TestDeletePackRefreshesSelection(t *testing.T) {
 	}
 }
 
-func TestUseBuiltInWhaleWhenActive(t *testing.T) {
-	model, _, activations := newPacksTestModel(t, []PackSummary{testPack(true)})
+func TestBuiltInRowIsReadOnlyAndCanActivate(t *testing.T) {
+	builtin := testPack(false)
+	builtin.ID = "lucia-whale"
+	builtin.Name = "鲸鱼"
+	builtin.Builtin = true
+	model, _, activations := newPacksTestModel(t, []PackSummary{builtin})
 	model.refreshPacks()
-	if model.activePackID() != "tiny" {
-		t.Fatalf("active = %q", model.activePackID())
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("素材包"); err != nil {
+		t.Fatal(err)
 	}
-	model.activatePack("")
-	if *activations != 1 {
-		t.Fatalf("activations = %d, want 1", *activations)
+	for _, want := range []string{"内置", "鲸鱼", "启用"} {
+		if !tt.HasText(want) {
+			t.Errorf("built-in row does not show %q; texts: %v", want, tt.Texts())
+		}
+	}
+	if tt.HasText("删除") {
+		t.Fatalf("built-in row shows a delete button; texts: %v", tt.Texts())
+	}
+	if err := tt.Click("启用"); err != nil {
+		t.Fatal(err)
+	}
+	if *activations != 1 || model.activePackID() != "lucia-whale" {
+		t.Fatalf("activations=%d active=%q", *activations, model.activePackID())
 	}
 }
