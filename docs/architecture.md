@@ -1,6 +1,6 @@
 # 架构
 
-更新日期：2026-10-24。本文维护 Lucia 的模块边界、启动顺序、共享目录与更新状态机；开发命令见 [development.md](development.md)，发布规则见 [release.md](release.md)。
+更新日期：2026-10-25。本文维护 Lucia 的模块边界、启动顺序、共享目录与更新状态机；开发命令见 [development.md](development.md)，发布规则见 [release.md](release.md)。
 
 ## 1. 总体结构
 
@@ -33,7 +33,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 3. 调用 `mygo.App.SetPath` 覆盖 `PathUserData`、`PathCache`、`PathLogs`，让框架自己的状态（窗口位置、更新状态）与应用文件落在同一根目录。覆盖必须在 `Run` 前完成。
 4. `RequestSingleInstanceLock`；第二个实例把命令行交给第一个实例后直接退出，不接触日志与数据文件。
 5. 打开诊断日志，写入首行 `version=… commit=… platform=… data=… logs=…`。打不开日志不阻止启动。
-6. 读取设置，并构造进程内唯一的 `settings.Store`。文件缺失用默认值；文件损坏记录原因并继续用默认值。
+6. 读取设置，应用保存的应用主题（`mygo.Theme.SetSource`），并构造进程内唯一的 `settings.Store`。文件缺失用默认值；文件损坏记录原因并继续用默认值。
 7. 构造 `petpack.Store`，先执行 `Recover` 清理中断的导入、恢复 `.backup`、重建 lockfile，再把 `petPack` 写入 active；构造更新管理器，把 `CheckUpdatesOnLaunch` 同步到管理器的自动检查开关；加载内嵌鲸鱼包，再构造桌宠模型：`petPack` 非空时从 `<数据目录>/packs/<id>` 加载外部包，失败则记录日志、退回内嵌包并清除 active 选择，避免控制台状态与桌面不一致。动画包在后台解码 idle 缓存，首帧海报立即可见。
 8. 注册单实例、激活、`lucia://` 深链接、退出前与最后窗口关闭回调；设置应用菜单。
 9. `WhenReady` 中创建桌宠窗口、默认隐藏的气泡窗口与默认隐藏的控制台窗口，创建托盘，接上管理器的重绘与安装完成回调，再启动自动检查循环。

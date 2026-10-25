@@ -32,8 +32,8 @@ go run ./cmd/lucia
 开发工具流程：
 
 ```sh
-go run ./cmd/petpack -zip naiwa.zip
-go run ./cmd/petpack -check <数据目录>/packs/naiwa
+go run ./cmd/petpack -zip /path/to/pack.zip
+go run ./cmd/petpack -check /path/to/lucia/packs/naiwa
 ```
 
 默认自动选择最近使用的数据目录（`Lucia Dev`、`lucia` 或打包版 `Lucia`），也可以显式传 `-app`。数据目录跟随应用名：`go tool mygo dev` 是 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 是 `lucia`，打包版是 `Lucia`。**不要在 Lucia 运行时同时执行开发工具导入**：CLI 导入前先退出应用，或改用控制台。`-force` 覆盖同名包，`-activate=false` 只导入不切换。`-check <dir>` 校验当前 manifest 与全部 clip。素材包缺失或损坏时应用会回退内置包，并清除失效的 active 选择。

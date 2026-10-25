@@ -1,6 +1,6 @@
 # 开发指南
 
-更新日期：2026-10-20。本文维护环境要求、本地启动、测试与日志排查；架构见 [architecture.md](architecture.md)，发布见 [release.md](release.md)。
+更新日期：2026-10-25。本文维护环境要求、本地启动、测试与日志排查；架构见 [architecture.md](architecture.md)，发布见 [release.md](release.md)。
 
 ## 环境要求
 
@@ -69,7 +69,7 @@ lucia: self-test: version=0.0.1 commit=0123456789ab platform=darwin/arm64 update
 - `internal/updates`：禁用构建不联网、检查结果、失败可见、并发拒绝、安装进度、安装失败保留重试、自动检查启动。
 - `internal/pet`：内置立绘解码、眨眼帧选择、点击反应曲线、脸部点击区、身体拖动区、非方形布局、动画 idle/互动/拖动/特殊动作、Reduce Motion 海报、右键菜单、气泡台词与定位、透明根节点、可见像素、托盘图标尺寸，以及窗口位置约束。
 - `internal/petpack`：动画 WebP 的 ANMF 解析、部分帧、blend/dispose、裁剪缩放、单一 schema 严格校验、热区/交互/菜单/状态/事件/气泡、海报帧、zip 安装与 manifest 合并、Store/lockfile/pending 恢复、Unicode Path/GBK 文件名与 clip ID 归一化。
-- `internal/ui`：桌宠设置、侧栏页面切换、关于页版本/更新/数据信息、可用更新显示说明与安装按钮、禁用构建的解释。
+- `internal/ui`：桌宠设置、应用/气泡主题映射与提示、分组设置卡片、侧栏页面切换、关于页版本/更新/数据信息、可用更新显示说明与安装按钮、禁用构建的解释。
 
 视图测试不打开窗口，但会执行真实布局与点击；`ui.NewTester` 对重复 key 与生命周期错误是严格的。位置约束和气泡定位是纯几何测试；桌宠的透明、置顶、拖动、跨屏、气泡穿透与托盘必须另做真机验收，测试器不能代替窗口行为。
 
