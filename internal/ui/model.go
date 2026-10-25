@@ -67,10 +67,15 @@ type Config struct {
 	// on the UI thread; the application wraps the native dialog in a goroutine
 	// and posts the result back through Window.Update.
 	ChoosePackZipAsync func(done func(path string, err error))
-	// InstallPack installs a zip. It returns PackExistsError when the id is
-	// already installed and replace is false. It must not activate the pack;
-	// the console calls ActivatePack after a successful install.
+	// InstallPack installs a zip synchronously. It returns PackExistsError
+	// when the id is already installed and replace is false. It must not
+	// activate the pack; the console calls ActivatePack after a successful
+	// install. Tests and embedded hosts can use this form.
 	InstallPack func(zipPath string, replace bool) (PackSummary, error)
+	// InstallPackAsync is the UI-safe form. It should run the install away
+	// from the UI thread and call done on the UI thread. When set, it takes
+	// precedence over InstallPack.
+	InstallPackAsync func(zipPath string, replace bool, done func(PackSummary, error))
 	// ConfirmReplacePackAsync asks before replacing an installed id. done must
 	// be called on the UI thread.
 	ConfirmReplacePackAsync func(id, name string, done func(bool))

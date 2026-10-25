@@ -131,6 +131,9 @@ func (s *Store) SetActive(id string) error {
 	if IsReservedPackID(id) {
 		id = ""
 	}
+	if id != "" && !validPackDirID(id) {
+		return fmt.Errorf("invalid pack id %q", id)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lock, err := s.loadLocked()
@@ -229,11 +232,11 @@ func (s *Store) List() ([]Summary, error) {
 		manifest, err := ReadManifest(filepath.Join(s.PacksDir(), id), id)
 		if err != nil {
 			summaries = append(summaries, Summary{
-				ID: id, Active: id == s.active, Error: err.Error(),
+				ID: id, Active: strings.EqualFold(id, s.active), Error: err.Error(),
 			})
 			continue
 		}
-		summary := summaryFromManifest(manifest, id == s.active)
+		summary := summaryFromManifest(manifest, strings.EqualFold(id, s.active))
 		if summary.ID == "" {
 			summary.ID = id
 		}
@@ -316,7 +319,7 @@ func summaryFromManifest(manifest Manifest, active bool) Summary {
 
 func containsSummary(summaries []Summary, id string) bool {
 	for _, summary := range summaries {
-		if summary.ID == id {
+		if strings.EqualFold(summary.ID, id) {
 			return true
 		}
 	}
@@ -416,7 +419,7 @@ func (s *Store) Install(zipPath string, replace bool) (Summary, error) {
 func (s *Store) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if id == s.active {
+	if strings.EqualFold(id, s.active) {
 		return errors.New("正在使用的素材包不能删除")
 	}
 	if IsReservedPackID(id) {

@@ -81,7 +81,7 @@ lucia: self-test: version=0.0.1 commit=0123456789ab platform=darwin/arm64 update
 | Windows | 数据 `%LOCALAPPDATA%\Lucia`；日志 `%LOCALAPPDATA%\Lucia\logs\lucia.log`。 |
 
 - `settings.json` 位于数据目录，保存应用主题、桌宠可见性、大小、音效、气泡冷却、气泡主题、外部素材包选择与首次挥手的提示状态。进程内写入经过 `internal/settings.Store`，控制台只合并展示类字段。
-- 外部素材包位于数据目录的 `packs/<id>/`，lockfile 为 `packs.lock.json`，中断安装记录为 `packs.pending.json`。控制台“素材包”页可导入/启用/删除；开发工具仍可用 `go run ./cmd/petpack -zip <file>`，`-check <dir>` 校验当前 schema 与全部 clip。不要在应用运行时并发执行开发工具导入；它不进入仓库、CI 或安装包。
+- 外部素材包位于数据目录的 `packs/<id>/`，lockfile 为 `packs.lock.json`，中断安装记录为 `packs.pending.json`。控制台“素材包”页可导入/启用/删除；开发工具仍可用 `go run ./cmd/petpack -zip /path/to/pack.zip`，`-check <dir>` 校验当前 schema 与全部 clip。不要在应用运行时并发执行开发工具导入；它不进入仓库、CI 或安装包。
 - 日志单文件上限 1 MiB，保留 `.1`–`.3` 三份备份；每行先写文件再镜像到 stderr。
 - 窗口位置由 MyGo 按 `StateKey: "main"` 保存到同一数据根。
 - 在应用内“关于”页可直接打开数据目录；菜单“文件 → 打开数据目录”同样可用。

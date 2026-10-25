@@ -181,6 +181,17 @@ func TestStoreDeleteRejectsRecoveryArtifacts(t *testing.T) {
 	}
 }
 
+func TestStoreDeleteRejectsCaseVariantOfActive(t *testing.T) {
+	data := t.TempDir()
+	store := NewStore(data, "tiny")
+	if err := os.MkdirAll(filepath.Join(data, "packs", "Tiny"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete("Tiny"); err == nil {
+		t.Fatal("Delete removed the active pack through a case variant")
+	}
+}
+
 func TestStoreInstallWithoutManifestUsesFilenameAndDefaults(t *testing.T) {
 	data := t.TempDir()
 	store := NewStore(data, "")

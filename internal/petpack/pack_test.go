@@ -153,10 +153,38 @@ func TestImportZip(t *testing.T) {
 	}
 }
 
+func TestImportZipInfersIDFromFilename(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "tiny.zip")
+	writeTinyZip(t, zipPath)
+	pack, err := ImportZip(zipPath, filepath.Join(dir, "packs"), ImportOptions{
+		Base: Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pack.Manifest.ID != "tiny" {
+		t.Fatalf("inferred id = %q, want tiny", pack.Manifest.ID)
+	}
+}
+
 func TestInvalidPackID(t *testing.T) {
 	for _, id := range []string{"", ".", "..", "../escape", "a/b", `a\b`, "a b"} {
 		if _, err := Load(t.TempDir(), id, 1); err == nil {
 			t.Errorf("Load accepted invalid id %q", id)
+		}
+	}
+}
+
+func TestPackDirectoryIDsAreLowercase(t *testing.T) {
+	for _, id := range []string{"tiny-pack", "pack_2"} {
+		if !validPackDirID(id) {
+			t.Errorf("validPackDirID(%q) = false", id)
+		}
+	}
+	for _, id := range []string{"Tiny", "TINY", "Pack_2"} {
+		if validPackDirID(id) {
+			t.Errorf("validPackDirID accepted mixed-case id %q", id)
 		}
 	}
 }

@@ -163,6 +163,28 @@ func TestImportPackNeedsNoLicenseGate(t *testing.T) {
 	}
 }
 
+func TestImportPackAsyncKeepsBusyUntilCompletion(t *testing.T) {
+	model, imports, activations := newPacksTestModel(t, nil)
+	var done func(PackSummary, error)
+	model.cfg.InstallPackAsync = func(_ string, _ bool, callback func(PackSummary, error)) {
+		done = callback
+	}
+	model.packZip = "tiny.zip"
+
+	model.importPack()
+	if !model.packBusy || done == nil {
+		t.Fatalf("busy=%v callback=%v", model.packBusy, done != nil)
+	}
+	if *imports != 0 {
+		t.Fatalf("synchronous installer ran %d times", *imports)
+	}
+
+	done(testPack(true), nil)
+	if model.packBusy || *activations != 1 {
+		t.Fatalf("busy=%v activations=%d", model.packBusy, *activations)
+	}
+}
+
 func TestImportPackConfirmsOnlyOnSameID(t *testing.T) {
 	model, imports, activations := newPacksTestModel(t, []PackSummary{testPack(true)})
 	confirmed := 0

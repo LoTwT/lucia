@@ -127,7 +127,7 @@
 }
 ```
 
-- 只有 `schema: 1`。缺失、其他值或未知字段都在严格解码阶段失败；代码中只有一个解析路径。
+- 只有 `schema: 1`。缺失、其他值或未知字段都在严格解码阶段失败；代码中只有一个解析路径。素材包 `id` 只允许小写字母、数字、`_` 和 `-`，避免 macOS/Windows 大小写不敏感文件系统上的目录冲突。
 - `canvas`、`crop`、`base.window`、`base.sprite`、`bubbleAnchor` 定义几何；`crop` 是画布内的裁剪矩形，导入时计算不透明区域并外扩 2 px。
 - `clips` 保存文件名、帧数、循环标志和 SHA-256；`actions` 把状态和事件映射到 `enter/loop/exit/once` clip。`loopCount = -1` 表示持续循环，`0` 跳过 loop，`> 0` 播放指定遍数。
 - `states` 必填 `idle`，可声明 `drag`、`drowsy`、`asleep`。`asleep` 必须循环或提供 poster；未声明时显示 idle 海报。
@@ -139,16 +139,16 @@
 
 ## 导入与控制台
 
-- 控制台与 `cmd/petpack` 共用导入器。zip 中任意层级最浅的 `pack.json` 或 `pack.meta.json` 提供 id、名称、几何、动作、状态、事件、热区、交互和菜单；缺失时从 zip 文件名推导 id 并生成显式 actions/states/events/menu，不生成热区或交互。`states.idle` 缺失时只补缺失的 `idle/drag/drowsy/asleep` 字段，不覆盖作者已声明的状态。
+- 控制台与 `cmd/petpack` 共用导入器。zip 中任意层级最浅的 `pack.json` 或 `pack.meta.json` 提供 id、名称、几何、动作、状态、事件、热区、交互和菜单；缺失时从 zip 文件名推导 id 并生成显式 actions/states/events/menu，不生成热区或交互。`states.idle` 缺失时只补缺失的 `idle/drag/drowsy/asleep` 字段，不覆盖作者已声明的状态。CLI 默认尊重 manifest 中的 id、名称和几何，显式 `-id`/`-name` 才覆盖。
 - 导入只接受 `.webp`，丢弃 MP4 预览；限制 manifest 4 MiB、单文件 64 MiB、解压总量 512 MiB，防止 zip-slip 与 zip 炸弹；先写临时目录，旧包备份后安装新包并校验，失败时回滚。
 - `Store.Install(zip, replace)` 在 id 已存在且 `replace=false` 时返回 `*PackExistsError`，此时磁盘没有任何写入。控制台收到后弹出原生替换确认，确认后再以 `replace=true` 重试；取消无副作用。
 - 导入不再要求授权勾选，`license` 仅展示。同名冲突才出现替换确认。
 - 导入成功后桌宠立即切换；失败时保留原模型。列表可启用、删除未使用的包并预览海报、热区、交互步骤和动作时序。正在使用的包不能删除。
-- 导入、替换和预览仍在 UI 线程同步执行，大包会短暂阻塞控制台；运行中的应用与开发工具不能同时导入。
+- 导入和替换在后台执行，完成后通过 UI 线程更新控制台并切换模型；预览仍在 UI 线程执行。运行中的应用与开发工具不能同时导入（没有跨进程锁）。
 - 开发命令：
   ```sh
-  go run ./cmd/petpack -zip naiwa.zip
-  go run ./cmd/petpack -zip naiwa.zip -app Lucia
+  go run ./cmd/petpack -zip /path/to/pack.zip
+  go run ./cmd/petpack -zip /path/to/pack.zip -app Lucia
   go run ./cmd/petpack -check <pack-dir>
   ```
   `-force` 覆盖同名包，`-activate=false` 只导入不切换。数据目录默认自动选择最近使用的 `Lucia Dev`、`lucia` 或 `Lucia`。
@@ -174,7 +174,7 @@
 ## 后续产品项
 
 - 可视化素材编辑器：在控制台里拖拽热区、编辑交互 steps 与 timing，并直接写回 `pack.json`。
-- 预览与导入异步化，避免大包阻塞控制台 UI。
+- 预览异步化，避免大包海报生成阻塞控制台 UI。
 - 为 CLI 与控制台增加跨进程文件锁。
 - 自定义气泡样式、音效文件和更多 motion 枚举，需要先定义可验证的封闭集合。
 

@@ -62,7 +62,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 - 解码：`internal/petpack` 解析 WebP RIFF/ANMF，使用 `golang.org/x/image/webp` decode 单帧，再按 blend/dispose 顺序合成；不引入 cgo。每帧保留自身时长，支持特殊动作的长停顿帧。
 - 播放：`internal/pet` 的动画状态机按 UI 时钟推进 `enter → loop → exit`；idle 预解码缓存，其他 clip 在 UI 线程顺序解码。缓存为后台工作，不驱动 UI。Reduce Motion 使用 `reducedPoster`。
 - 安装：控制台和 `cmd/petpack` 共用导入器。读取 zip 中任意层级最浅的 `pack.json`/`pack.meta.json`（4 MiB 上限），优先使用带 CRC32 校验的 0x7075 Unicode Path，回退 GBK；只接受 `.webp`，跳过 `__MACOSX/` 与 `._*` 资源叉，限制单文件 64 MiB、总量 512 MiB，写临时目录后备份旧包、安装并校验，失败回滚。`Store.Install(zip, replace)` 仅在同名且未请求替换时返回 `PackExistsError`，此时没有写入；控制台据此弹出确认。授权不再作为导入门槛。
-- 控制台：素材包页列出内嵌包与有效/无效的用户包、clip/帧/热区/交互数量与授权状态，生成海报预览、叠加热区，并列出交互步骤与动作停留时序；内嵌包只读。导入后立即加载新模型并切换，失败则保留旧模型和旧设置；替换正在使用的包后若启用失败，会切回内置包。导入/预览同步跑在 UI 线程，大包会短暂阻塞控制台。运行中的应用与 `cmd/petpack` 不能并发导入（只有进程内互斥）。
+- 控制台：素材包页列出内嵌包与有效/无效的用户包、clip/帧/热区/交互数量与授权状态，生成海报预览、叠加热区，并列出交互步骤与动作停留时序；内嵌包只读。导入在后台执行并回到 UI 线程切换新模型，失败则保留旧模型和旧设置；替换正在使用的包后若启用失败，会切回内置包。预览仍在 UI 线程执行。运行中的应用与 `cmd/petpack` 不能并发导入（只有进程内互斥）。
 - 回退：manifest/解码/海报任一失败都记录日志并使用内嵌包，并清除失效的 active 选择；可选素材不能阻止应用启动。
 - 分发：naiwa 等外部素材不进入 Git、CI、DMG/NSIS 或发布资产；授权由用户本地确认。
 

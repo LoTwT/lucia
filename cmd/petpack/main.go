@@ -21,8 +21,8 @@ func main() {
 	zipPath := flag.String("zip", "", "animated-WebP zip to import")
 	appName := flag.String("app", "", "application name used to resolve the data directory; empty auto-detects Lucia Dev, lucia or Lucia")
 	dataDir := flag.String("data", "", "explicit data directory; overrides -app")
-	packID := flag.String("id", "naiwa", "pack id below <data>/packs")
-	packName := flag.String("name", "naiwa", "display name")
+	packID := flag.String("id", "", "pack id below <data>/packs; empty uses the manifest or zip name")
+	packName := flag.String("name", "", "display name; empty uses the manifest")
 	force := flag.Bool("force", false, "replace an existing pack with the same id")
 	activate := flag.Bool("activate", true, "select this pack in settings.json")
 	checkDir := flag.String("check", "", "validate a pack directory and exit")
@@ -55,17 +55,24 @@ func main() {
 	if err := store.Recover(); err != nil {
 		log.Fatal(err)
 	}
-	pack, err := petpack.ImportZip(*zipPath, filepath.Join(data, "packs"), petpack.ImportOptions{
-		ID:   *packID,
-		Name: *packName,
-		Base: petpack.Base{
+	_, hasManifest, err := petpack.ReadZipManifest(*zipPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	opts := petpack.ImportOptions{
+		ID:    *packID,
+		Name:  *packName,
+		Force: *force,
+	}
+	if !hasManifest {
+		opts.Base = petpack.Base{
 			Window: petpack.Size{Width: 248, Height: 310},
 			Sprite: petpack.Size{Width: 240, Height: 300},
 			Margin: 4,
-		},
-		BubbleAnchor: petpack.Anchor{X: 0.5, Y: 0.05},
-		Force:        *force,
-	})
+		}
+		opts.BubbleAnchor = petpack.Anchor{X: 0.5, Y: 0.05}
+	}
+	pack, err := petpack.ImportZip(*zipPath, filepath.Join(data, "packs"), opts)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -70,6 +70,9 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		opts.ID = baseManifest.ID
 	}
 	if opts.ID == "" {
+		opts.ID = idFromZipName(zipPath)
+	}
+	if opts.ID == "" {
 		return nil, fmt.Errorf("petpack import: empty pack id")
 	}
 	if !validPackDirID(opts.ID) {

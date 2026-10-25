@@ -205,16 +205,27 @@ func main() {
 				parent.Update(func() { done(path, err) })
 			}()
 		},
-		InstallPack: func(zipPath string, replace bool) (appui.PackSummary, error) {
-			summary, err := packStore.Install(zipPath, replace)
-			if err != nil {
-				var exists *petpack.PackExistsError
-				if errors.As(err, &exists) {
-					return appui.PackSummary{}, &appui.PackExistsError{ID: exists.ID, Name: exists.Name}
+		InstallPackAsync: func(zipPath string, replace bool, done func(appui.PackSummary, error)) {
+			// Parsing clips and measuring crops is expensive; keep it off the
+			// UI thread, then hand the result back through Window.Update.
+			parent := win
+			go func() {
+				summary, err := packStore.Install(zipPath, replace)
+				if err != nil {
+					var exists *petpack.PackExistsError
+					if errors.As(err, &exists) {
+						err = &appui.PackExistsError{ID: exists.ID, Name: exists.Name}
+					}
 				}
-				return appui.PackSummary{}, err
-			}
-			return uiPackSummary(summary), nil
+				if parent == nil || parent.IsDestroyed() {
+					return
+				}
+				if err != nil {
+					parent.Update(func() { done(appui.PackSummary{}, err) })
+					return
+				}
+				parent.Update(func() { done(uiPackSummary(summary), nil) })
+			}()
 		},
 		ConfirmReplacePackAsync: func(id, name string, done func(bool)) {
 			parent := win

@@ -188,7 +188,7 @@ func (m *Model) packImportPanel(c *ui.Context) {
 			if ui.PrimaryButton(c, "导入并启用").Disabled(m.packBusy || m.packZip == "").Clicked() {
 				m.importPack()
 			}
-			ui.Text(c, "导入过程中窗口可能短暂卡顿；完成后素材包立即生效。").
+			ui.Text(c, "导入在后台进行；大型素材包可能需要十几秒，期间桌宠保持运行。").
 				FontSize(11).TextColor(t.TextMuted)
 		})
 		if m.packBusy {
@@ -438,7 +438,7 @@ func (m *Model) confirmDeletePack(id, name string) {
 }
 
 func (m *Model) importPack() {
-	if m.cfg.InstallPack == nil || m.packZip == "" || m.packBusy {
+	if (m.cfg.InstallPack == nil && m.cfg.InstallPackAsync == nil) || m.packZip == "" || m.packBusy {
 		return
 	}
 	m.packBusy = true
@@ -449,7 +449,17 @@ func (m *Model) importPack() {
 
 func (m *Model) installPack(replace bool) {
 	previousActive := m.activePackID()
+	if m.cfg.InstallPackAsync != nil {
+		m.cfg.InstallPackAsync(m.packZip, replace, func(pack PackSummary, err error) {
+			m.finishInstall(previousActive, pack, err, replace)
+		})
+		return
+	}
 	pack, err := m.cfg.InstallPack(m.packZip, replace)
+	m.finishInstall(previousActive, pack, err, replace)
+}
+
+func (m *Model) finishInstall(previousActive string, pack PackSummary, err error, replace bool) {
 	if err != nil {
 		var exists *PackExistsError
 		if !replace && errors.As(err, &exists) && m.cfg.ConfirmReplacePackAsync != nil {
@@ -474,7 +484,7 @@ func (m *Model) installPack(replace bool) {
 	if err := m.activatePackBackend(pack.ID); err != nil {
 		m.packActionErr = fmt.Sprintf("素材包已导入，但启用失败：%v", err)
 		m.packNotice = fmt.Sprintf("已导入 %s，但未启用。", pack.Name)
-		if previousActive == pack.ID {
+		if strings.EqualFold(previousActive, pack.ID) {
 			if fallbackErr := m.activatePackBackend(""); fallbackErr != nil {
 				m.packActionErr += fmt.Sprintf("；回退内置鲸鱼也失败：%v", fallbackErr)
 			} else {
