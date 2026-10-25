@@ -255,6 +255,89 @@ func TestBubbleThemeHint(t *testing.T) {
 	}
 }
 
+func TestSaveSettingsFailureRestoresPersistedValues(t *testing.T) {
+	prefs := settings.Default()
+	model := New(Config{
+		Settings: prefs,
+		SaveSettings: func(settings.Settings) error {
+			return errors.New("disk full")
+		},
+	})
+	model.settings.Theme = settings.ThemeDark
+	model.themeChoice = themeChoices[2]
+	model.settings.PetScale = 1.5
+	model.petScaleChoice = petScaleChoices[3]
+	model.settings.SoundEnabled = true
+	model.settings.BubbleTheme = settings.BubbleThemeDark
+	model.bubbleThemeChoice = bubbleThemeChoices[2]
+	model.settings.BubbleCooldownSeconds = 120
+	model.bubbleChoice = bubbleChoices[2]
+
+	if model.saveSettings() {
+		t.Fatal("saveSettings reported success")
+	}
+	if model.settings.Theme != prefs.Theme || model.themeChoice != themeChoices[0] {
+		t.Fatalf("theme was not rolled back: theme=%q choice=%q", model.settings.Theme, model.themeChoice)
+	}
+	if model.settings.PetScale != prefs.PetScale || model.petScaleChoice != petScaleChoices[1] {
+		t.Fatalf("scale was not rolled back: scale=%v choice=%q", model.settings.PetScale, model.petScaleChoice)
+	}
+	if model.settings.SoundEnabled != prefs.SoundEnabled {
+		t.Fatal("sound setting was not rolled back")
+	}
+	if model.settings.BubbleTheme != prefs.BubbleTheme || model.bubbleThemeChoice != bubbleThemeChoices[0] {
+		t.Fatalf("bubble theme was not rolled back: theme=%q choice=%q", model.settings.BubbleTheme, model.bubbleThemeChoice)
+	}
+	if model.settings.BubbleCooldownSeconds != prefs.BubbleCooldownSeconds || model.bubbleChoice != bubbleChoices[0] {
+		t.Fatalf("bubble frequency was not rolled back: seconds=%d choice=%q", model.settings.BubbleCooldownSeconds, model.bubbleChoice)
+	}
+	if model.settingsErr == "" {
+		t.Fatal("save failure was not reported")
+	}
+}
+
+func TestSaveSettingsFailureRestoresLastSuccessfulValues(t *testing.T) {
+	fail := false
+	model := New(Config{
+		Settings: settings.Default(),
+		SaveSettings: func(settings.Settings) error {
+			if fail {
+				return errors.New("disk full")
+			}
+			return nil
+		},
+	})
+	model.settings.Theme = settings.ThemeDark
+	model.themeChoice = themeChoices[2]
+	if !model.saveSettings() {
+		t.Fatal("first save reported failure")
+	}
+
+	fail = true
+	model.settings.BubbleTheme = settings.BubbleThemeDark
+	model.bubbleThemeChoice = bubbleThemeChoices[2]
+	if model.saveSettings() {
+		t.Fatal("second save reported success")
+	}
+	if model.settings.Theme != settings.ThemeDark || model.themeChoice != themeChoices[2] {
+		t.Fatalf("last successful theme was lost: theme=%q choice=%q", model.settings.Theme, model.themeChoice)
+	}
+	if model.settings.BubbleTheme != settings.BubbleThemeApp || model.bubbleThemeChoice != bubbleThemeChoices[0] {
+		t.Fatalf("bubble theme was not rolled back: theme=%q choice=%q", model.settings.BubbleTheme, model.bubbleThemeChoice)
+	}
+}
+
+func TestSaveSettingsWithoutStoreSucceeds(t *testing.T) {
+	model := New(Config{Settings: settings.Default()})
+	model.settings.Theme = settings.ThemeDark
+	if !model.saveSettings() {
+		t.Fatal("saveSettings without a store reported failure")
+	}
+	if model.savedSettings.Theme != settings.ThemeDark {
+		t.Fatal("saveSettings without a store did not update the snapshot")
+	}
+}
+
 func TestSetPetVisiblePersists(t *testing.T) {
 	var saved settings.Settings
 	model := New(Config{
@@ -263,12 +346,30 @@ func TestSetPetVisiblePersists(t *testing.T) {
 		Settings:     settings.Default(),
 		SaveSettings: func(s settings.Settings) error { saved = s; return nil },
 	})
-	model.SetPetVisible(false)
+	if !model.SetPetVisible(false) {
+		t.Fatal("set pet visibility reported failure")
+	}
 	if model.settings.PetVisible {
 		t.Fatal("model still shows the pet")
 	}
 	if saved.PetVisible {
 		t.Fatal("saved settings still show the pet")
+	}
+}
+
+func TestSetPetVisibleFailureRollsBack(t *testing.T) {
+	model := New(Config{
+		Settings:     settings.Default(),
+		SaveSettings: func(settings.Settings) error { return errors.New("disk full") },
+	})
+	if model.SetPetVisible(false) {
+		t.Fatal("set pet visibility reported success")
+	}
+	if !model.settings.PetVisible {
+		t.Fatal("pet visibility was not rolled back")
+	}
+	if model.settingsErr == "" {
+		t.Fatal("save failure was not reported")
 	}
 }
 

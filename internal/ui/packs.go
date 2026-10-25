@@ -23,9 +23,11 @@ func (e *PackExistsError) Error() string {
 // PackSummary is the console's view of one installed pack. It deliberately
 // contains no filesystem handles; the application layer owns petpack.Store.
 type PackSummary struct {
-	ID              string
-	Name            string
-	Active          bool
+	ID     string
+	Name   string
+	Active bool
+	// Builtin marks the embedded fallback summary. It does not count as an
+	// installed user pack for the empty-state hint.
 	Builtin         bool
 	Valid           bool
 	Error           string
@@ -102,7 +104,7 @@ func (m *Model) packsPage(c *ui.Context) {
 		if m.packsErr != "" {
 			ui.Text(c, m.packsErr).FontSize(12).TextColor(t.Danger).Selectable()
 		}
-		if len(m.packs) == 0 {
+		if m.packsErr == "" && !hasUserPacks(m.packs) {
 			ui.Text(c, "还没有安装素材包；内置鲸鱼会继续作为默认皮肤。").
 				FontSize(13).TextColor(t.TextMuted)
 		}
@@ -336,6 +338,15 @@ func (m *Model) refreshPacks() {
 	m.loadPackPreview()
 }
 
+func hasUserPacks(packs []PackSummary) bool {
+	for _, pack := range packs {
+		if !pack.Builtin {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) selectedPack() (PackSummary, bool) {
 	for _, pack := range m.packs {
 		if pack.ID == m.packSelected {
@@ -534,8 +545,21 @@ func (m *Model) deletePack(id string) {
 	if m.packSelected == id {
 		m.packSelected = ""
 	}
+	remaining := m.packs[:0]
+	for _, pack := range m.packs {
+		if pack.ID != id {
+			remaining = append(remaining, pack)
+		}
+	}
+	m.packs = remaining
 	m.packsLoaded = false
 	m.refreshPacks()
+	if m.packsErr != "" {
+		// The delete succeeded even if the follow-up listing could not read
+		// the directory. Do not present the stale row or claim a failed
+		// deletion.
+		m.packNotice = "素材包已删除，但列表刷新失败。"
+	}
 }
 
 func interactionStepsText(steps []PackInteractionStep) string {

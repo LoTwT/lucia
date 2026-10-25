@@ -138,6 +138,49 @@ func TestPacksPageShowsMetadataPreviewAndHotzones(t *testing.T) {
 	}
 }
 
+func TestPacksPageShowsEmptyHintWithOnlyBuiltin(t *testing.T) {
+	builtin := testPack(false)
+	builtin.ID = "lucia-whale"
+	builtin.Name = "Lucia 鲸鱼"
+	builtin.Builtin = true
+	model, _, _ := newPacksTestModel(t, []PackSummary{builtin})
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("素材包"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("还没有安装素材包；内置鲸鱼会继续作为默认皮肤。") {
+		t.Fatalf("only-builtin page does not show the empty hint; texts: %v", tt.Texts())
+	}
+}
+
+func TestPacksPageHidesEmptyHintWithUserPack(t *testing.T) {
+	model, _, _ := newPacksTestModel(t, []PackSummary{testPack(false)})
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("素材包"); err != nil {
+		t.Fatal(err)
+	}
+	if tt.HasText("还没有安装素材包；内置鲸鱼会继续作为默认皮肤。") {
+		t.Fatalf("page with a user pack shows the empty hint; texts: %v", tt.Texts())
+	}
+}
+
+func TestPacksPageHidesEmptyHintWhenListingFails(t *testing.T) {
+	model, _, _ := newPacksTestModel(t, nil)
+	model.packs = nil
+	model.packsLoaded = true
+	model.packsErr = "读取素材包失败：permission denied"
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("素材包"); err != nil {
+		t.Fatal(err)
+	}
+	if tt.HasText("还没有安装素材包；内置鲸鱼会继续作为默认皮肤。") {
+		t.Fatalf("failed listing also shows the empty hint; texts: %v", tt.Texts())
+	}
+	if !tt.HasText("读取素材包失败：permission denied") {
+		t.Fatalf("failed listing error is missing; texts: %v", tt.Texts())
+	}
+}
+
 func TestPacksPageInvalidPackExplainsWhy(t *testing.T) {
 	model, _, _ := newPacksTestModel(t, []PackSummary{{
 		ID: "broken", Name: "Broken", Active: true, Error: "bad manifest",
@@ -353,6 +396,25 @@ func TestDeletePackRefreshesSelection(t *testing.T) {
 	model.deletePack("tiny")
 	if model.packSelected != "" {
 		t.Fatalf("selected = %q, want empty after delete", model.packSelected)
+	}
+}
+
+func TestDeletePackDropsRowWhenRefreshFails(t *testing.T) {
+	model, _, _ := newPacksTestModel(t, []PackSummary{testPack(false)})
+	model.refreshPacks()
+	model.packSelected = "tiny"
+	model.cfg.LoadPacks = func() ([]PackSummary, error) {
+		return nil, errors.New("permission denied")
+	}
+	model.deletePack("tiny")
+	if len(model.packs) != 0 {
+		t.Fatalf("deleted pack stayed in the UI list: %+v", model.packs)
+	}
+	if model.packNotice != "素材包已删除，但列表刷新失败。" {
+		t.Fatalf("notice = %q", model.packNotice)
+	}
+	if model.packsErr == "" {
+		t.Fatal("refresh failure was not reported")
 	}
 }
 

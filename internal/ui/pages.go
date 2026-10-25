@@ -79,10 +79,11 @@ func (m *Model) updateStatusPanel(c *ui.Context) {
 				})
 				ui.Switch(c, &m.settings.CheckUpdatesOnLaunch).Label("启动时自动检查更新").
 					OnChange(func() {
-						m.saveSettings()
-						m.cfg.Updates.SetAutoCheck(m.settings.CheckUpdatesOnLaunch)
-						if m.settings.CheckUpdatesOnLaunch {
-							m.cfg.Updates.CheckAsync()
+						if m.saveSettings() {
+							m.cfg.Updates.SetAutoCheck(m.settings.CheckUpdatesOnLaunch)
+							if m.settings.CheckUpdatesOnLaunch {
+								m.cfg.Updates.CheckAsync()
+							}
 						}
 					})
 			})
@@ -151,15 +152,28 @@ func (m *Model) aboutLinks(c *ui.Context) {
 	}
 }
 
-func (m *Model) saveSettings() {
+func (m *Model) saveSettings() bool {
 	if m.cfg.SaveSettings == nil {
-		return
+		m.savedSettings = m.settings
+		m.settingsErr = ""
+		return true
 	}
 	if err := m.cfg.SaveSettings(m.settings); err != nil {
+		m.settings = m.savedSettings
+		m.syncSettingsChoices()
 		m.settingsErr = fmt.Sprintf("保存设置失败：%v", err)
-		return
+		return false
 	}
+	m.savedSettings = m.settings
 	m.settingsErr = ""
+	return true
+}
+
+func (m *Model) syncSettingsChoices() {
+	m.themeChoice = themeChoiceFor(m.settings.Theme)
+	m.bubbleChoice = bubbleChoiceFor(m.settings.BubbleCooldownSeconds)
+	m.bubbleThemeChoice = bubbleThemeChoiceFor(m.settings.BubbleTheme)
+	m.petScaleChoice = petScaleChoiceFor(m.settings.PetScale)
 }
 
 func canInstall(s updates.Snapshot) bool {

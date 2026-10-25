@@ -30,8 +30,10 @@ type Config struct {
 	Updates *updates.Manager
 	// Settings is the preference set loaded at startup.
 	Settings settings.Settings
-	// SaveSettings persists a preference change. Nil keeps changes in
-	// memory only (tests).
+	// SaveSettings persists the console-owned presentation fields. Nil keeps
+	// changes in memory only (tests). Runtime fields such as PetPack and
+	// PetIntroPlayed belong to the host, so an implementation must merge
+	// rather than replace the whole settings file.
 	SaveSettings func(settings.Settings) error
 	// ApplyPetVisible shows or hides the desktop pet after the preference
 	// changes. Nil hides the control in tests or embedded hosts.
@@ -103,7 +105,10 @@ type Model struct {
 	cfg      Config
 	page     string
 	settings settings.Settings
-	md       markdown.Options
+	// savedSettings is the last value successfully written through
+	// SaveSettings; it lets a failed write roll the UI back.
+	savedSettings settings.Settings
+	md            markdown.Options
 	// actionErr reports a failed side effect, such as opening the data
 	// directory, next to the action that caused it.
 	actionErr string
@@ -143,6 +148,7 @@ func New(cfg Config) *Model {
 		cfg:               cfg,
 		page:              PageOverview,
 		settings:          cfg.Settings,
+		savedSettings:     cfg.Settings,
 		themeChoice:       themeChoiceFor(cfg.Settings.Theme),
 		bubbleChoice:      bubbleChoiceFor(cfg.Settings.BubbleCooldownSeconds),
 		bubbleThemeChoice: bubbleThemeChoiceFor(cfg.Settings.BubbleTheme),
@@ -417,13 +423,15 @@ func bubbleThemeHint(theme, bubbleTheme string) string {
 }
 
 // SetPetVisible keeps the console's copy in sync when the tray toggles the
-// pet. It also persists the new state.
-func (m *Model) SetPetVisible(visible bool) {
+// pet. It also persists the new state and reports whether that write
+// succeeded; callers that already changed the pet window must restore it on
+// failure to keep the visible state, settings, and disk in agreement.
+func (m *Model) SetPetVisible(visible bool) bool {
 	if m.settings.PetVisible == visible {
-		return
+		return true
 	}
 	m.settings.PetVisible = visible
-	m.saveSettings()
+	return m.saveSettings()
 }
 
 func (m *Model) petCard(c *ui.Context) {
@@ -438,8 +446,7 @@ func (m *Model) petCard(c *ui.Context) {
 				})
 				if ui.Select(c, &m.themeChoice, themeChoices).Label("主题模式").Width(170).Changed() {
 					m.settings.Theme = themeForChoice(m.themeChoice)
-					m.saveSettings()
-					if m.cfg.ApplyTheme != nil {
+					if m.saveSettings() && m.cfg.ApplyTheme != nil {
 						m.cfg.ApplyTheme(m.settings.Theme)
 					}
 				}
@@ -452,8 +459,7 @@ func (m *Model) petCard(c *ui.Context) {
 						TextColor(t.TextMuted)
 				})
 				ui.Switch(c, &m.settings.PetVisible).Label("显示桌宠").OnChange(func() {
-					m.saveSettings()
-					if m.cfg.ApplyPetVisible != nil {
+					if m.saveSettings() && m.cfg.ApplyPetVisible != nil {
 						m.cfg.ApplyPetVisible(m.settings.PetVisible)
 					}
 				})
@@ -467,8 +473,7 @@ func (m *Model) petCard(c *ui.Context) {
 				})
 				if ui.Select(c, &m.petScaleChoice, petScaleChoices).Label("桌宠大小").Width(170).Changed() {
 					m.settings.PetScale = petScaleForChoice(m.petScaleChoice)
-					m.saveSettings()
-					if m.cfg.ApplyPetScale != nil {
+					if m.saveSettings() && m.cfg.ApplyPetScale != nil {
 						m.cfg.ApplyPetScale(m.settings.PetScale)
 					}
 				}
@@ -484,8 +489,7 @@ func (m *Model) petCard(c *ui.Context) {
 				})
 				if ui.Select(c, &m.bubbleThemeChoice, bubbleThemeChoices).Label("气泡主题").Width(170).Changed() {
 					m.settings.BubbleTheme = bubbleThemeForChoice(m.bubbleThemeChoice)
-					m.saveSettings()
-					if m.cfg.ApplyBubbleTheme != nil {
+					if m.saveSettings() && m.cfg.ApplyBubbleTheme != nil {
 						m.cfg.ApplyBubbleTheme(m.settings.BubbleTheme)
 					}
 				}
@@ -499,7 +503,7 @@ func (m *Model) petCard(c *ui.Context) {
 				})
 				if ui.Select(c, &m.bubbleChoice, bubbleChoices).Label("气泡频率").Width(170).Changed() {
 					m.settings.BubbleCooldownSeconds = bubbleSeconds(m.bubbleChoice)
-					m.saveSettings()
+					_ = m.saveSettings()
 				}
 			})
 		})
@@ -511,7 +515,7 @@ func (m *Model) petCard(c *ui.Context) {
 					ui.Text(c, "摸脸和摸摸头时播放一小段提示音。").FontSize(12).
 						TextColor(t.TextMuted)
 				})
-				ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(m.saveSettings)
+				ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(func() { _ = m.saveSettings() })
 			})
 		})
 
@@ -542,8 +546,9 @@ func (m *Model) petCard(c *ui.Context) {
 						})
 						if ui.Button(c, "重置").Clicked() {
 							m.settings.PetVisible = true
-							m.saveSettings()
-							m.cfg.ResetPetPosition()
+							if m.saveSettings() {
+								m.cfg.ResetPetPosition()
+							}
 						}
 					})
 				}

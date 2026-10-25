@@ -171,8 +171,8 @@ func TestDocumentedExampleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var manifest Manifest
-	if err := json.Unmarshal(body, &manifest); err != nil {
+	manifest, err := decodeManifest(body)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := validateManifest("example", manifest); err != nil {

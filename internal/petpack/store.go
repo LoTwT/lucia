@@ -437,16 +437,19 @@ func (s *Store) Delete(id string) error {
 	if err := os.Rename(dir, trash); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(trash); err != nil {
-		return err
+	// The pack is already out of the visible namespace. If cleanup fails
+	// (for example, a locked file on Windows), leave the .trash directory
+	// for Recover to remove instead of reporting a deletion that did happen.
+	_ = os.RemoveAll(trash)
+	// The lockfile is a cache, not the source of installed packs. Once the
+	// rename succeeds the pack is gone, so a lock write failure must not
+	// turn this into a failed deletion; List/Recover rebuild the cache.
+	if lock, err := s.loadLocked(); err == nil {
+		delete(lock.Packs, id)
+		lock.Active = s.active
+		_ = s.saveLockLocked(lock)
 	}
-	lock, err := s.loadLocked()
-	if err != nil {
-		return err
-	}
-	delete(lock.Packs, id)
-	lock.Active = s.active
-	return s.saveLockLocked(lock)
+	return nil
 }
 
 // Preview returns a PNG poster for the console. It uses the idle poster when
