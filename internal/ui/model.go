@@ -59,12 +59,13 @@ type Config struct {
 	// on the UI thread; the application wraps the native dialog in a goroutine
 	// and posts the result back through Window.Update.
 	ChoosePackZipAsync func(done func(path string, err error))
-	// ImportPack installs a zip. It must not activate the pack; the console
-	// calls ActivatePack after a successful import.
-	ImportPack func(zipPath string, acceptLicense bool) (PackSummary, error)
-	// ReplacePack installs a zip over an existing id. Nil hides the replace
-	// option.
-	ReplacePack func(zipPath string, acceptLicense bool) (PackSummary, error)
+	// InstallPack installs a zip. It returns PackExistsError when the id is
+	// already installed and replace is false. It must not activate the pack;
+	// the console calls ActivatePack after a successful install.
+	InstallPack func(zipPath string, replace bool) (PackSummary, error)
+	// ConfirmReplacePackAsync asks before replacing an installed id. done must
+	// be called on the UI thread.
+	ConfirmReplacePackAsync func(id, name string, done func(bool))
 	// ActivatePack switches the running pet and persists petPack.
 	ActivatePack func(id string) error
 	// DeletePack removes an inactive pack.
@@ -109,8 +110,6 @@ type Model struct {
 	packsErr       string
 	packSelected   string
 	packZip        string
-	packLicense    bool
-	packReplace    bool
 	packBusy       bool
 	packPreview    *ui.Bitmap
 	packPreviewID  string

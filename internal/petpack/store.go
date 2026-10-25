@@ -26,28 +26,29 @@ const (
 // Summary is the console-facing description of one pack. Preview is loaded
 // separately because decoding a poster is comparatively expensive.
 type Summary struct {
-	ID          string
-	Name        string
-	Schema      int
-	Active      bool
-	Valid       bool
-	Error       string
-	Clips       int
-	Frames      int
-	Hotzones    []HotzoneEntry
-	Presets     int
-	PresetList  []PresetDetail
-	ActionList  []ActionDetail
-	License     string
-	InstalledAt time.Time
+	ID              string
+	Name            string
+	Active          bool
+	Builtin         bool
+	Valid           bool
+	Error           string
+	Clips           int
+	Frames          int
+	Hotzones        []HotzoneEntry
+	Interactions    int
+	InteractionList []InteractionDetail
+	ActionList      []ActionDetail
+	License         string
+	InstalledAt     time.Time
 }
 
-// PresetDetail is the console-facing description of one interaction preset.
-type PresetDetail struct {
-	ID       string
-	Reaction string
-	Bubble   string
-	Steps    []PresetStep
+// InteractionDetail is the console-facing description of one interaction.
+type InteractionDetail struct {
+	ID     string
+	Label  string
+	Bubble string
+	Motion string
+	Steps  []Step
 }
 
 // ActionDetail exposes the authored timing without decoding a clip.
@@ -59,16 +60,26 @@ type ActionDetail struct {
 }
 
 type lockEntry struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Schema      int       `json:"schema"`
-	Clips       int       `json:"clips"`
-	Frames      int       `json:"frames"`
-	Hotzones    int       `json:"hotzones"`
-	Presets     int       `json:"presets"`
-	License     string    `json:"license,omitempty"`
-	Digest      string    `json:"digest,omitempty"`
-	InstalledAt time.Time `json:"installedAt"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Clips        int       `json:"clips"`
+	Frames       int       `json:"frames"`
+	Hotzones     int       `json:"hotzones"`
+	Interactions int       `json:"interactions"`
+	License      string    `json:"license,omitempty"`
+	Digest       string    `json:"digest,omitempty"`
+	InstalledAt  time.Time `json:"installedAt"`
+}
+
+// PackExistsError reports that Install found an installed pack with the same
+// id. Nothing has been written when this error is returned.
+type PackExistsError struct {
+	ID   string
+	Name string
+}
+
+func (e *PackExistsError) Error() string {
+	return fmt.Sprintf("素材包 %q 已存在", e.ID)
 }
 
 type lockfile struct {
@@ -98,6 +109,9 @@ type Store struct {
 // NewStore returns a store rooted at dataDir. The active id is normally
 // settings.PetPack; callers should call Recover before loading the player.
 func NewStore(dataDir, active string) *Store {
+	if IsReservedPackID(active) {
+		active = ""
+	}
 	return &Store{dataDir: dataDir, active: active}
 }
 
@@ -114,6 +128,9 @@ func (s *Store) Active() string {
 // settings.json; the application keeps that as the user-facing source of
 // truth and updates both through its activation callback.
 func (s *Store) SetActive(id string) error {
+	if IsReservedPackID(id) {
+		id = ""
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lock, err := s.loadLocked()
@@ -206,6 +223,9 @@ func (s *Store) List() ([]Summary, error) {
 			continue
 		}
 		id := entry.Name()
+		if IsReservedPackID(id) {
+			continue
+		}
 		manifest, err := ReadManifest(filepath.Join(s.PacksDir(), id), id)
 		if err != nil {
 			summaries = append(summaries, Summary{
@@ -248,23 +268,23 @@ func summaryFromManifest(manifest Manifest, active bool) Summary {
 		_ = json.Unmarshal(manifest.License, &license)
 	}
 	if license.Status == "" {
-		license.Status = "unknown"
+		license.Status = "未声明"
 	}
 	frames := 0
 	for _, clip := range manifest.Clips {
 		frames += clip.Frames
 	}
-	presetIDs := make([]string, 0, len(manifest.Presets))
-	for id := range manifest.Presets {
-		presetIDs = append(presetIDs, id)
+	interactionIDs := make([]string, 0, len(manifest.Interactions))
+	for id := range manifest.Interactions {
+		interactionIDs = append(interactionIDs, id)
 	}
-	sort.Strings(presetIDs)
-	presets := make([]PresetDetail, 0, len(presetIDs))
-	for _, id := range presetIDs {
-		preset := manifest.Presets[id]
-		presets = append(presets, PresetDetail{
-			ID: id, Reaction: preset.Reaction, Bubble: preset.Bubble,
-			Steps: append([]PresetStep(nil), preset.Steps...),
+	sort.Strings(interactionIDs)
+	interactions := make([]InteractionDetail, 0, len(interactionIDs))
+	for _, id := range interactionIDs {
+		interaction := manifest.Interactions[id]
+		interactions = append(interactions, InteractionDetail{
+			ID: id, Label: interaction.Label, Bubble: interaction.Bubble,
+			Motion: interaction.Motion, Steps: append([]Step(nil), interaction.Steps...),
 		})
 	}
 	actionIDs := make([]string, 0, len(manifest.Actions))
@@ -280,10 +300,10 @@ func summaryFromManifest(manifest Manifest, active bool) Summary {
 		})
 	}
 	return Summary{
-		ID: manifest.ID, Name: manifest.Name, Schema: manifest.Schema,
+		ID: manifest.ID, Name: manifest.Name,
 		Active: active, Valid: true, Clips: len(manifest.Clips), Frames: frames,
-		Hotzones: manifest.HotzoneList(), Presets: len(manifest.Presets),
-		PresetList: presets, ActionList: actions,
+		Hotzones: manifest.HotzoneList(), Interactions: len(manifest.Interactions),
+		InteractionList: interactions, ActionList: actions,
 		License: license.Status,
 	}
 }
@@ -297,25 +317,13 @@ func containsSummary(summaries []Summary, id string) bool {
 	return false
 }
 
-// Import validates a zip, installs it below packs/<id>, and records it in
+// Install validates a zip, installs it below packs/<id>, and records it in
 // the lockfile. It never activates the pack; the console asks the
-// application to activate it after the import succeeds.
-func (s *Store) Import(zipPath string, acceptLicense bool) (Summary, error) {
-	return s.importPack(zipPath, acceptLicense, false)
-}
-
-// Replace installs a pack even when its id already exists. ImportZip keeps a
-// backup and restores it if validation fails.
-func (s *Store) Replace(zipPath string, acceptLicense bool) (Summary, error) {
-	return s.importPack(zipPath, acceptLicense, true)
-}
-
-func (s *Store) importPack(zipPath string, acceptLicense, replace bool) (Summary, error) {
+// application to activate it after the install succeeds. A same-id pack
+// returns *PackExistsError before anything is written unless replace is true.
+func (s *Store) Install(zipPath string, replace bool) (Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !acceptLicense {
-		return Summary{}, errors.New("导入前请确认你拥有该素材包的本地使用授权")
-	}
 	if err := os.MkdirAll(s.PacksDir(), 0o755); err != nil {
 		return Summary{}, err
 	}
@@ -330,10 +338,17 @@ func (s *Store) importPack(zipPath string, acceptLicense, replace bool) (Summary
 	if !validPackDirID(id) {
 		return Summary{}, fmt.Errorf("无法从压缩包确定合法的素材包 id（%q）", id)
 	}
+	if IsReservedPackID(id) {
+		return Summary{}, fmt.Errorf("素材包 id %q 保留给内置素材包", id)
+	}
 	final := filepath.Join(s.PacksDir(), id)
 	if _, err := os.Stat(final); err == nil {
 		if !replace {
-			return Summary{}, fmt.Errorf("素材包 %q 已存在；请先删除旧版本，或勾选替换后重试", id)
+			name := manifest.Name
+			if name == "" {
+				name = id
+			}
+			return Summary{}, &PackExistsError{ID: id, Name: name}
 		}
 	} else if !os.IsNotExist(err) {
 		return Summary{}, err
@@ -360,7 +375,6 @@ func (s *Store) importPack(zipPath string, acceptLicense, replace bool) (Summary
 			Sprite: Size{Width: 240, Height: 300},
 			Margin: 4,
 		}
-		opts.Face = Face{X: 0.34, Y: 0.06, Width: 0.32, Height: 0.20}
 		opts.BubbleAnchor = Anchor{X: 0.5, Y: 0.05}
 	}
 	_, importErr := ImportZip(zipPath, s.PacksDir(), opts)
@@ -399,6 +413,9 @@ func (s *Store) Delete(id string) error {
 	if id == s.active {
 		return errors.New("正在使用的素材包不能删除")
 	}
+	if IsReservedPackID(id) {
+		return errors.New("内置素材包不能删除")
+	}
 	if id == "" || id == "." || id == ".." || strings.HasPrefix(id, ".") ||
 		strings.HasSuffix(id, ".backup") || strings.ContainsAny(id, `/\`) || filepath.Base(id) != id {
 		return fmt.Errorf("invalid pack id %q", id)
@@ -430,7 +447,7 @@ func (s *Store) Preview(id string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	action, ok := pack.Action("idle")
+	action, ok := pack.Action(pack.Manifest.States.Idle)
 	if !ok || action.Poster == "" {
 		for _, candidate := range sortedActions(pack.Manifest.Actions) {
 			if candidate.Poster != "" {
@@ -537,7 +554,8 @@ func (s *Store) refreshLockLocked(lock *lockfile) error {
 			continue
 		}
 		id := entry.Name()
-		if strings.HasPrefix(id, ".") || strings.HasSuffix(id, ".backup") || !validPackDirID(id) {
+		if strings.HasPrefix(id, ".") || strings.HasSuffix(id, ".backup") || !validPackDirID(id) ||
+			IsReservedPackID(id) {
 			continue
 		}
 		dir := filepath.Join(s.PacksDir(), id)
@@ -567,9 +585,9 @@ func (s *Store) refreshLockLocked(lock *lockfile) error {
 			installedAt = info.ModTime().UTC()
 		}
 		next[id] = lockEntry{
-			ID: id, Name: manifest.Name, Schema: manifest.Schema,
+			ID: id, Name: manifest.Name,
 			Clips: len(manifest.Clips), Frames: frames,
-			Hotzones: len(manifest.Hotzones), Presets: len(manifest.Presets),
+			Hotzones: len(manifest.Hotzones), Interactions: len(manifest.Interactions),
 			License: license.Status, Digest: hex.EncodeToString(sum[:]),
 			InstalledAt: installedAt,
 		}
@@ -603,7 +621,7 @@ func (s *Store) writePendingLocked(pending pendingFile) error {
 }
 
 func (s *Store) recoverPendingLocked(pending *pendingFile) {
-	if pending == nil || !validPackID(pending.ID) {
+	if pending == nil || !validPackDirID(pending.ID) || IsReservedPackID(pending.ID) {
 		return
 	}
 	final := filepath.Join(s.PacksDir(), pending.ID)

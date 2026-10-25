@@ -138,7 +138,6 @@ func TestImportZip(t *testing.T) {
 		ID:   "tiny",
 		Name: "Tiny",
 		Base: Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
-		Face: Face{X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -364,7 +363,6 @@ func TestImportRequiresIdleLoop(t *testing.T) {
 	_, err = ImportZip(zipPath, filepath.Join(dir, "packs"), ImportOptions{
 		ID: "no-idle", Name: "No idle",
 		Base: Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
-		Face: Face{X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5},
 	})
 	if err == nil || !strings.Contains(err.Error(), "idle_loop") {
 		t.Fatalf("ImportZip error = %v, want missing idle_loop error", err)
@@ -397,14 +395,14 @@ func writeTinyPack(t *testing.T) string {
 		Canvas:       Size{Width: 16, Height: 16},
 		Crop:         Rect{Width: 16, Height: 16},
 		Base:         Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
-		Face:         Face{X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5},
 		BubbleAnchor: Anchor{X: 0.5, Y: 0.1},
 		Clips: map[string]ClipEntry{
 			"idle_loop": {File: "clips/idle_loop.webp", Frames: 3, Loop: true},
 		},
 		Actions: map[string]Action{
-			"idle": {Loop: "idle_loop", Poster: "idle_loop#0", FaceClickable: true, LoopCount: -1},
+			"idle": {Loop: "idle_loop", Poster: "idle_loop#0", Interruptible: true, LoopCount: -1},
 		},
+		States: States{Idle: "idle"},
 	}
 	body, err := json.Marshal(manifest)
 	if err != nil {

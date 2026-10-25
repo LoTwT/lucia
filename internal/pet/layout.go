@@ -136,7 +136,7 @@ func (m *Model) layoutHotzones() {
 	for _, entry := range m.hotzoneEntries {
 		rect := entry.Rect
 		m.hotzones = append(m.hotzones, Hotzone{
-			ID: entry.ID, Label: entry.Label, Preset: entry.Preset, Action: entry.Action,
+			ID: entry.ID, Label: entry.Label, Interaction: entry.Interaction,
 			Rect: ui.Rect{
 				X: m.imageRect.X + float32(rect.X*float64(m.imageRect.W)),
 				Y: m.imageRect.Y + float32(rect.Y*float64(m.imageRect.H)),
@@ -185,7 +185,7 @@ func (m *Model) Hotzones() []Hotzone {
 		return nil
 	}
 	return []Hotzone{{
-		ID: "face", Label: "摸摸脸", Preset: "tap", Rect: m.faceRegion,
+		ID: "face", Label: "摸摸脸", Interaction: "poke", Rect: m.faceRegion,
 	}}
 }
 

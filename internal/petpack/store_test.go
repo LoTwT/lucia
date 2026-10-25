@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,15 +19,15 @@ func TestStoreImportListActivateDelete(t *testing.T) {
 	if err := store.Recover(); err != nil {
 		t.Fatal(err)
 	}
-	summary, err := store.Import(zipPath, true)
+	summary, err := store.Install(zipPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if summary.ID != "tiny" || summary.Name != "Tiny" || !summary.Valid {
 		t.Fatalf("summary = %+v", summary)
 	}
-	if summary.Schema != 2 || len(summary.Hotzones) == 0 || summary.Presets == 0 {
-		t.Fatalf("summary lacks schema 2 interaction data: %+v", summary)
+	if len(summary.Hotzones) == 0 || summary.Interactions == 0 {
+		t.Fatalf("summary lacks interaction data: %+v", summary)
 	}
 	if _, err := os.Stat(filepath.Join(data, LockFile)); err != nil {
 		t.Fatalf("lockfile: %v", err)
@@ -69,20 +70,22 @@ func TestStoreImportListActivateDelete(t *testing.T) {
 	}
 }
 
-func TestStoreImportRequiresLicenseAndDoesNotOverwrite(t *testing.T) {
+func TestStoreInstallConflictsOnlyWhenIdExists(t *testing.T) {
 	data := t.TempDir()
 	zipPath := writeStoreZip(t, data, true)
 	store := NewStore(data, "")
-	if _, err := store.Import(zipPath, false); err == nil || !strings.Contains(err.Error(), "授权") {
-		t.Fatalf("license error = %v", err)
-	}
-	if _, err := store.Import(zipPath, true); err != nil {
+	if _, err := store.Install(zipPath, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Import(zipPath, true); err == nil || !strings.Contains(err.Error(), "已存在") {
-		t.Fatalf("existing pack error = %v", err)
+	_, err := store.Install(zipPath, false)
+	var exists *PackExistsError
+	if !errors.As(err, &exists) || exists.ID != "tiny" || exists.Name != "Tiny" {
+		t.Fatalf("existing pack error = %v, want PackExistsError", err)
 	}
-	if _, err := store.Replace(zipPath, true); err != nil {
+	if _, err := os.Stat(filepath.Join(data, PendingFile)); !os.IsNotExist(err) {
+		t.Fatalf("conflict wrote a pending file: %v", err)
+	}
+	if _, err := store.Install(zipPath, true); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(data, "packs", "tiny.backup")); !os.IsNotExist(err) {
@@ -90,25 +93,28 @@ func TestStoreImportRequiresLicenseAndDoesNotOverwrite(t *testing.T) {
 	}
 }
 
-func TestImportMetaOnlyBuildsDefaultPresetSteps(t *testing.T) {
+func TestImportMetaOnlyKeepsInteractionsAndBuildsActions(t *testing.T) {
 	data := t.TempDir()
 	zipPath := writeMetaOnlyZip(t, data)
 	pack, err := ImportZip(zipPath, filepath.Join(data, "out"), ImportOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"tap", "pat"} {
-		preset, ok := pack.Preset(id)
-		if !ok || len(preset.Steps) == 0 {
-			t.Fatalf("%s preset = %+v, want a default step after actions are built", id, preset)
-		}
+	if _, ok := pack.Manifest.Actions["happy"]; !ok {
+		t.Fatal("import did not build the happy action")
+	}
+	if len(pack.Manifest.Interactions) == 0 || len(pack.Manifest.Hotzones) == 0 {
+		t.Fatalf("authored interactions were lost: %+v", pack.Manifest)
+	}
+	if pack.Manifest.Schema != 1 {
+		t.Fatalf("schema = %d, want 1", pack.Manifest.Schema)
 	}
 }
 
 func TestStoreReplaceFailureRestoresHealthyPack(t *testing.T) {
 	data := t.TempDir()
 	store := NewStore(data, "")
-	if _, err := store.Import(writeStoreZip(t, data, true), true); err != nil {
+	if _, err := store.Install(writeStoreZip(t, data, true), false); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetActive("tiny"); err != nil {
@@ -117,7 +123,7 @@ func TestStoreReplaceFailureRestoresHealthyPack(t *testing.T) {
 	badZip := writeZipWithManifest(t, data, "bad-tiny.zip", func(m *Manifest) {
 		m.Actions["idle"] = Action{Loop: "missing", Poster: "idle_loop#0", LoopCount: -1}
 	})
-	if _, err := store.Replace(badZip, true); err == nil {
+	if _, err := store.Install(badZip, true); err == nil {
 		t.Fatal("Replace accepted a pack with a missing idle clip")
 	}
 	list, err := store.List()
@@ -163,15 +169,23 @@ func TestStoreDeleteRejectsRecoveryArtifacts(t *testing.T) {
 	}
 }
 
-func TestStoreImportWithoutManifestUsesFilenameAndDefaults(t *testing.T) {
+func TestStoreInstallWithoutManifestUsesFilenameAndDefaults(t *testing.T) {
 	data := t.TempDir()
 	store := NewStore(data, "")
-	summary, err := store.Import(writeStoreZip(t, data, false), true)
+	summary, err := store.Install(writeStoreZip(t, data, false), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.ID != "tiny" || !summary.Valid || len(summary.Hotzones) == 0 || summary.Presets == 0 {
+	if summary.ID != "tiny" || !summary.Valid || len(summary.Hotzones) != 0 ||
+		summary.Interactions != 0 {
 		t.Fatalf("summary = %+v", summary)
+	}
+	pack, err := Load(data, "tiny", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pack.Manifest.States.Idle != "idle" || len(pack.Manifest.Actions) == 0 {
+		t.Fatalf("generated manifest = %+v", pack.Manifest)
 	}
 }
 
@@ -227,7 +241,7 @@ func TestStoreDeletesInvalidDirectorySafely(t *testing.T) {
 func TestStorePreviewPNG(t *testing.T) {
 	data := t.TempDir()
 	store := NewStore(data, "")
-	if _, err := store.Import(writeStoreZip(t, data, true), true); err != nil {
+	if _, err := store.Install(writeStoreZip(t, data, true), false); err != nil {
 		t.Fatal(err)
 	}
 	preview, err := store.Preview("tiny")
@@ -242,7 +256,7 @@ func TestStorePreviewPNG(t *testing.T) {
 func TestStoreRecoverPendingRestoresBackup(t *testing.T) {
 	data := t.TempDir()
 	store := NewStore(data, "")
-	if _, err := store.Import(writeStoreZip(t, data, true), true); err != nil {
+	if _, err := store.Install(writeStoreZip(t, data, true), false); err != nil {
 		t.Fatal(err)
 	}
 	final := filepath.Join(data, "packs", "tiny")
@@ -277,7 +291,7 @@ func TestStoreRecoverPendingRestoresBackup(t *testing.T) {
 func TestStoreRecoverRestoresBackupOverBrokenFinal(t *testing.T) {
 	data := t.TempDir()
 	store := NewStore(data, "")
-	if _, err := store.Import(writeStoreZip(t, data, true), true); err != nil {
+	if _, err := store.Install(writeStoreZip(t, data, true), false); err != nil {
 		t.Fatal(err)
 	}
 	final := filepath.Join(data, "packs", "tiny")
@@ -334,10 +348,10 @@ func TestImportZipCarriesPackManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pack.Manifest.ID != "tiny" || pack.Manifest.Name != "Tiny" || pack.Manifest.Schema != 2 {
+	if pack.Manifest.ID != "tiny" || pack.Manifest.Name != "Tiny" || pack.Manifest.Schema != 1 {
 		t.Fatalf("pack manifest = %+v", pack.Manifest)
 	}
-	if len(pack.Manifest.Hotzones) == 0 || len(pack.Manifest.Presets) == 0 {
+	if len(pack.Manifest.Hotzones) == 0 || len(pack.Manifest.Interactions) == 0 {
 		t.Fatalf("manifest interaction data was lost: %+v", pack.Manifest)
 	}
 	if got := pack.Manifest.Actions["happy"].Once; got != "idle_loop" {

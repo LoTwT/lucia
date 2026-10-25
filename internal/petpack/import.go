@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -30,14 +31,13 @@ type importedClip struct {
 	entry ClipEntry
 }
 
-// ImportOptions controls the metadata written by an import. Base and Face
-// are presentation choices; the clips and crop come from the zip. A pack
-// may carry its own pack.json, which supplies any field left zero here.
+// ImportOptions controls the metadata written by an import. Base is a
+// presentation choice; the clips and crop come from the zip. A pack may
+// carry its own pack.json, which supplies any field left zero here.
 type ImportOptions struct {
 	ID           string
 	Name         string
 	Base         Base
-	Face         Face
 	BubbleAnchor Anchor
 	Force        bool
 	// OnStage reports the import's current stage for crash recovery. It is
@@ -74,6 +74,9 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	}
 	if !validPackDirID(opts.ID) {
 		return nil, fmt.Errorf("petpack import: invalid pack id %q", opts.ID)
+	}
+	if IsReservedPackID(opts.ID) {
+		return nil, fmt.Errorf("petpack import: %q is reserved for the built-in pack", opts.ID)
 	}
 	if opts.Name == "" {
 		opts.Name = baseManifest.Name
@@ -188,40 +191,40 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		base.Sprite.Width <= 0 || base.Sprite.Height <= 0 {
 		return nil, fmt.Errorf("petpack import: base window and sprite sizes are required")
 	}
-	face := opts.Face
-	if face.Width <= 0 && face.Height <= 0 {
-		face = baseManifest.Face
-	}
-	license := baseManifest.License
-	if len(license) == 0 {
-		license = json.RawMessage(`{"status":"local-only","note":"imported by the user; not distributed with Lucia"}`)
-	}
 	actions := baseManifest.Actions
 	if len(actions) == 0 {
 		actions = buildActions(imported)
 	}
-	hotzones := baseManifest.Hotzones
-	presets := baseManifest.Presets
+	states := baseManifest.States
+	if states.Idle == "" {
+		states = buildStates(actions)
+	}
+	events := baseManifest.Events
+	menu := baseManifest.Menu
 	if !hasManifest {
-		hotzones = nil
-		presets = nil
+		events = buildEvents(actions)
+		menu = buildMenu(actions)
 	}
 	manifest := Manifest{
-		Schema:  2,
+		Schema:  1,
 		ID:      opts.ID,
 		Name:    opts.Name,
-		License: license,
+		License: baseManifest.License,
 		Canvas:  canvas,
 		Crop: Rect{
 			X: crop.Min.X, Y: crop.Min.Y, Width: crop.Dx(), Height: crop.Dy(),
 		},
 		Base:         base,
-		Face:         face,
 		BubbleAnchor: opts.BubbleAnchor,
 		Clips:        make(map[string]ClipEntry, len(imported)),
 		Actions:      actions,
-		Hotzones:     hotzones,
-		Presets:      presets,
+		States:       states,
+		Events:       events,
+		Hotzones:     baseManifest.Hotzones,
+		Interactions: baseManifest.Interactions,
+		Bubbles:      baseManifest.Bubbles,
+		Menu:         menu,
+		IdleMotion:   baseManifest.IdleMotion,
 	}
 	for id, item := range imported {
 		entry := item.entry
@@ -230,7 +233,9 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		}
 		manifest.Clips[id] = entry
 	}
-	normalizeManifest(&manifest)
+	if err := validateManifest(opts.ID, manifest); err != nil {
+		return nil, fmt.Errorf("petpack import: %w", err)
+	}
 	stage("installing")
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -393,9 +398,9 @@ func buildActions(imported map[string]importedClip) map[string]Action {
 		return ok
 	}
 	actions := make(map[string]Action)
-	addChain := func(id, label string, loopCount int, faceClickable bool) {
+	addChain := func(id, label string, loopCount int, interruptible bool) {
 		enter, loop, exit := id+"_enter", id+"_loop", id+"_exit"
-		action := Action{Label: label, FaceClickable: faceClickable}
+		action := Action{Label: label, Interruptible: interruptible}
 		if has(enter) {
 			action.Enter = enter
 		}
@@ -418,7 +423,7 @@ func buildActions(imported map[string]importedClip) map[string]Action {
 		actions[id] = action
 	}
 	if has("idle_loop") {
-		actions["idle"] = Action{Label: "待机", Loop: "idle_loop", Poster: "idle_loop#0", FaceClickable: true, LoopCount: -1}
+		actions["idle"] = Action{Label: "待机", Loop: "idle_loop", Poster: "idle_loop#0", Interruptible: true, LoopCount: -1}
 	}
 	addChain("happy", "开心", 0, true)
 	addChain("laugh", "大笑", 0, true)
@@ -461,9 +466,61 @@ func buildActions(imported map[string]importedClip) map[string]Action {
 	return actions
 }
 
+func buildStates(actions map[string]Action) States {
+	states := States{Idle: "idle"}
+	if _, ok := actions["drag"]; ok {
+		states.Drag = "drag"
+	}
+	if _, ok := actions["sleep_denial"]; ok {
+		states.Drowsy = "sleep_denial"
+	}
+	return states
+}
+
+func buildEvents(actions map[string]Action) Events {
+	events := Events{}
+	if _, ok := actions["wave"]; ok {
+		events.Intro = "wave"
+		events.Activate = "wave"
+		events.Reset = "wave"
+	}
+	if _, ok := actions["think"]; ok {
+		events.UpdateChecking = "think"
+	}
+	if _, ok := actions["sad"]; ok {
+		events.UpdateFailed = "sad"
+	}
+	return events
+}
+
+func buildMenu(actions map[string]Action) []MenuEntry {
+	order := []string{"belly_taunt", "pretend_deaf", "smug_stumble", "sleep_denial", "play_innocent", "edge_peek"}
+	var entries []MenuEntry
+	seen := make(map[string]bool, len(order))
+	for _, id := range order {
+		action, ok := actions[id]
+		if ok && action.Once != "" && action.Label != "" {
+			entries = append(entries, MenuEntry{Action: id})
+			seen[id] = true
+		}
+	}
+	var rest []string
+	for id, action := range actions {
+		if seen[id] || action.Once == "" || action.Label == "" {
+			continue
+		}
+		rest = append(rest, id)
+	}
+	sort.Strings(rest)
+	for _, id := range rest {
+		entries = append(entries, MenuEntry{Action: id})
+	}
+	return entries
+}
+
 // ReadZipManifest inspects a pack zip without extracting artwork. It returns
-// the manifest as authored, without schema defaults, so the importer can
-// build actions first and then fill the default presets from them.
+// the manifest as authored so the importer can build actions first and then
+// fill the generated states, events and menu from them.
 func ReadZipManifest(zipPath string) (Manifest, bool, error) {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -497,9 +554,12 @@ func readZipManifest(files []*zip.File) (Manifest, bool, error) {
 	if len(data) > limit {
 		return Manifest{}, true, fmt.Errorf("%s exceeds the 4 MiB manifest limit", entry.Name)
 	}
-	var manifest Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	manifest, err := decodeManifest(data)
+	if err != nil {
 		return Manifest{}, true, fmt.Errorf("parse %s: %w", entry.Name, err)
+	}
+	if manifest.Schema != 1 {
+		return Manifest{}, true, fmt.Errorf("%s: schema %d, want 1", entry.Name, manifest.Schema)
 	}
 	return manifest, true, nil
 }

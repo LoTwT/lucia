@@ -89,42 +89,51 @@ func activityAt(idle time.Duration) Activity {
 // decides which frame and bob offset to show, so there is no ticker or
 // background goroutine to stop.
 type Model struct {
-	frames          [3]*ui.Bitmap
-	layout          assetLayout
-	scale           float64
-	windowWidth     int
-	windowHeight    int
-	spriteWidth     int
-	spriteHeight    int
-	imageRect       ui.Rect
-	faceRegion      ui.Rect
-	hotzones        []Hotzone
-	hotzoneEntries  []petpack.HotzoneEntry
-	bubbleAnchorX   float64
-	bubbleAnchorY   float64
-	bubbleRect      ui.Rect
-	start           time.Time
-	lastInteraction time.Time
-	interacted      bool
-	dragging        bool
-	tapAt           time.Time
-	tapReady        bool
-	reaction        Reaction
-	onReaction      func(Reaction)
-	onInvalidate    func()
-	menuActions     MenuActions
-	animated        *animatedModel
+	frames            [3]*ui.Bitmap
+	layout            assetLayout
+	scale             float64
+	windowWidth       int
+	windowHeight      int
+	spriteWidth       int
+	spriteHeight      int
+	imageRect         ui.Rect
+	faceRegion        ui.Rect
+	hotzones          []Hotzone
+	hotzoneEntries    []petpack.HotzoneEntry
+	bubbleAnchorX     float64
+	bubbleAnchorY     float64
+	bubbleRect        ui.Rect
+	start             time.Time
+	lastInteraction   time.Time
+	interacted        bool
+	dragging          bool
+	tapAt             time.Time
+	tapReady          bool
+	reaction          Reaction
+	interactionID     string
+	interactionMotion string
+	interactionAt     time.Time
+	interactionReady  bool
+	bubbleSeq         map[string]int
+	onBubble          func(BubbleEvent)
+	onInvalidate      func()
+	menuActions       MenuActions
+	animated          *animatedModel
 }
 
-// Hotzone is one clickable region in window-local DIPs. Preset names an
-// interaction sequence from the pack; Action is the fallback when that
-// preset has no steps.
+// Hotzone is one clickable region in window-local DIPs.
 type Hotzone struct {
-	ID     string
-	Label  string
-	Preset string
-	Action string
-	Rect   ui.Rect
+	ID          string
+	Label       string
+	Interaction string
+	Rect        ui.Rect
+}
+
+// BubbleEvent is one authored line plus whether the interaction asks for the
+// host's short sound.
+type BubbleEvent struct {
+	Text  string
+	Sound bool
 }
 
 // MenuActions are the application-level actions offered by the pet's
@@ -169,9 +178,8 @@ const (
 	ReactionHeadPat
 )
 
-// SetReactionHandler installs the UI-thread callback for reactions. The
-// bubble window uses it to choose the line that belongs to the interaction.
-func (m *Model) SetReactionHandler(fn func(Reaction)) { m.onReaction = fn }
+// SetBubbleHandler installs the UI-thread callback for authored bubble lines.
+func (m *Model) SetBubbleHandler(fn func(BubbleEvent)) { m.onBubble = fn }
 
 // SetInvalidator asks for a fresh frame when state changes outside the view,
 // such as a click or the start of a drag. Without this, a resting pet that
@@ -188,122 +196,106 @@ func (m *Model) invalidate() {
 // menu. The pet package does not own windows, settings, or visibility.
 func (m *Model) SetMenuActions(actions MenuActions) { m.menuActions = actions }
 
-// React starts the squash-and-recover reaction. It is safe to call from the
-// UI thread's click and menu actions; the next view build turns the request
-// into a timestamp from the UI clock.
+// React starts the static artwork's squash-and-recover reaction. Animated
+// packs use TriggerInteraction instead.
 func (m *Model) React(reaction Reaction) {
 	m.reaction = reaction
 	m.tapReady = true
 	m.interacted = true
-	if m.animated != nil {
-		m.animated.requestReaction(reaction)
-	}
-	if m.onReaction != nil {
-		m.onReaction(reaction)
-	}
 	m.invalidate()
 }
 
-// TriggerHotzone starts the preset attached to a clickable region. Bubble
-// and sound follow the preset's bubble behavior; animation uses its step
-// sequence (or the region's action when the preset has no steps).
+// TriggerHotzone starts the interaction attached to a clickable region.
 func (m *Model) TriggerHotzone(id string) {
-	var zone Hotzone
-	found := false
 	for _, candidate := range m.Hotzones() {
 		if candidate.ID == id {
-			zone = candidate
-			found = true
-			break
+			m.TriggerInteraction(candidate.Interaction)
+			return
 		}
 	}
-	if !found {
+}
+
+// TriggerInteraction is the menu and hotzone entry for a named interaction.
+func (m *Model) TriggerInteraction(id string) {
+	if id == "" {
 		return
 	}
-	m.triggerPreset(zone.Preset, zone.Action, ReactionNone)
-}
-
-// TriggerPreset is the menu-facing entry for a named interaction preset.
-// When the artwork has no such preset, the static reaction still runs.
-func (m *Model) TriggerPreset(id string, fallback Reaction) {
-	m.triggerPreset(id, "", fallback)
-}
-
-func (m *Model) triggerPreset(presetID, action string, fallback Reaction) {
-	if presetID == "" {
-		presetID = "tap"
+	interaction, ok := m.interactionFor(id)
+	if !ok {
+		return
 	}
-	var preset petpack.Preset
-	if m.animated != nil {
-		preset, _ = m.animated.pack.Preset(presetID)
-	} else {
-		preset = defaultStaticPreset(presetID)
-	}
-	reaction := reactionForPreset(presetID, preset)
-	bubbleReaction := bubbleReactionForPreset(presetID, preset)
-	m.reaction = reaction
+	m.interactionID = id
+	m.interactionMotion = interaction.Motion
+	m.interactionReady = true
+	m.reaction = reactionForInteraction(id)
 	m.tapReady = true
 	m.interacted = true
 	if m.animated != nil {
-		if !m.animated.requestPreset(presetID, action) {
-			if fallback == ReactionNone {
-				fallback = reaction
-			}
-			if fallback != ReactionNone {
-				m.animated.requestReaction(fallback)
-			}
-		}
+		m.animated.requestInteraction(id)
 	}
-	if bubbleReaction != ReactionNone && m.onReaction != nil {
-		m.onReaction(bubbleReaction)
-	}
+	m.showBubble(interaction)
 	m.invalidate()
 }
 
-func defaultStaticPreset(id string) petpack.Preset {
+func (m *Model) interactionFor(id string) (petpack.Interaction, bool) {
+	if m.animated != nil {
+		return m.animated.pack.Interaction(id)
+	}
+	interaction, ok := defaultStaticInteraction(id)
+	return interaction, ok
+}
+
+func defaultStaticInteraction(id string) (petpack.Interaction, bool) {
 	switch id {
 	case "pat":
-		return petpack.Preset{Reaction: "pat", Bubble: "pat"}
+		return petpack.Interaction{Label: "摸摸头", Bubble: "pat", Motion: "lift"}, true
+	case "poke", "tap", "face":
+		return petpack.Interaction{Label: "摸摸脸", Bubble: "face", Motion: "squash"}, true
 	default:
-		return petpack.Preset{Reaction: "face", Bubble: "face"}
+		return petpack.Interaction{}, false
 	}
 }
 
-func reactionForPreset(id string, preset petpack.Preset) Reaction {
-	switch preset.Reaction {
-	case "face":
-		return ReactionFace
-	case "pat":
-		return ReactionHeadPat
-	case "none":
-		return ReactionNone
-	}
-	return fallbackReaction(id)
-}
-
-func bubbleReactionForPreset(id string, preset petpack.Preset) Reaction {
-	switch preset.Bubble {
-	case "face":
-		return ReactionFace
-	case "pat":
-		return ReactionHeadPat
-	case "none":
-		return ReactionNone
-	}
-	if preset.Reaction != "" {
-		return reactionForPreset(id, preset)
-	}
-	return fallbackReaction(id)
-}
-
-func fallbackReaction(id string) Reaction {
+func reactionForInteraction(id string) Reaction {
 	switch id {
 	case "pat":
 		return ReactionHeadPat
-	case "tap":
+	case "poke", "tap", "face":
 		return ReactionFace
 	default:
 		return ReactionNone
+	}
+}
+
+func (m *Model) showBubble(interaction petpack.Interaction) {
+	if m.onBubble == nil || interaction.Bubble == "" || interaction.Bubble == "none" {
+		return
+	}
+	var lines []string
+	if m.animated != nil {
+		lines = m.animated.pack.Manifest.Bubbles[interaction.Bubble]
+	} else {
+		lines = staticBubbleLines(interaction.Bubble)
+	}
+	if len(lines) == 0 {
+		return
+	}
+	if m.bubbleSeq == nil {
+		m.bubbleSeq = make(map[string]int)
+	}
+	index := m.bubbleSeq[interaction.Bubble] % len(lines)
+	m.bubbleSeq[interaction.Bubble]++
+	m.onBubble(BubbleEvent{Text: lines[index], Sound: interaction.Sound})
+}
+
+func staticBubbleLines(id string) []string {
+	switch id {
+	case "face":
+		return faceLines
+	case "pat":
+		return headPatLines
+	default:
+		return nil
 	}
 }
 
@@ -325,6 +317,7 @@ func (m *Model) PlayAction(id string) {
 	if m.animated == nil || id == "" {
 		return
 	}
+	m.interacted = true
 	m.animated.requestAction(id)
 	m.invalidate()
 }
@@ -385,6 +378,10 @@ func (m *Model) View(c *ui.Context) {
 		m.tapAt = now
 		m.tapReady = false
 	}
+	if m.interactionReady {
+		m.interactionAt = now
+		m.interactionReady = false
+	}
 	elapsed := now.Sub(m.start)
 	idle := now.Sub(m.lastInteraction)
 	activity := m.activity(now)
@@ -392,31 +389,54 @@ func (m *Model) View(c *ui.Context) {
 	reduceMotion := c.Preferences().ReduceMotion
 	bob, squash, lift := motionFor(reduceMotion, elapsed, m.reaction, reactionElapsed)
 	if m.animated != nil {
-		m.animated.sync(now, activity, idle, m.dragging, m.reaction, m.tapAt, reduceMotion)
+		bob, squash, lift = animatedMotion(reduceMotion, elapsed,
+			m.animated.pack.Manifest.IdleMotion, m.interactionMotion, m.interactionAt, now)
+		m.animated.sync(now, activity, idle, m.dragging, reduceMotion)
 	}
 
 	c.Root().Background(ui.Transparent)
 
 	outer := ui.Box(c).Fill().DragWindow()
 	outer.ContextMenu(func(menu *ui.Menu) {
-		if menu.Item("摸摸头").Chosen() {
-			m.TriggerPreset("pat", ReactionHeadPat)
-		}
-		if m.animated != nil && m.animated.canPlayActions() {
-			if actions := m.animated.onceActions(); len(actions) > 0 {
-				menu.Separator()
-				for _, action := range actions {
-					if menu.Item(action.Label).Chosen() {
-						m.animated.requestAction(action.ID)
-						m.invalidate()
+		addedPackItem := false
+		if m.animated != nil {
+			for _, entry := range m.animated.pack.Manifest.Menu {
+				if entry.Interaction != "" {
+					interaction, ok := m.animated.pack.Interaction(entry.Interaction)
+					if !ok || interaction.Label == "" {
+						continue
 					}
+					addedPackItem = true
+					if menu.Item(interaction.Label).Chosen() {
+						m.TriggerInteraction(entry.Interaction)
+					}
+					continue
 				}
+				if entry.Action == "" || !m.animated.canPlayActions() {
+					continue
+				}
+				action, ok := m.animated.pack.Action(entry.Action)
+				if !ok || action.Label == "" {
+					continue
+				}
+				addedPackItem = true
+				if menu.Item(action.Label).Chosen() {
+					m.animated.requestAction(entry.Action)
+					m.invalidate()
+				}
+			}
+		} else {
+			addedPackItem = true
+			if menu.Item("摸摸头").Chosen() {
+				m.TriggerInteraction("pat")
 			}
 		}
 		if m.menuActions.OpenSettings == nil && m.menuActions.Hide == nil && m.menuActions.Reset == nil {
 			return
 		}
-		menu.Separator()
+		if addedPackItem {
+			menu.Separator()
+		}
 		if m.menuActions.OpenSettings != nil && menu.Item("桌宠设置").Chosen() {
 			m.menuActions.OpenSettings()
 		}
@@ -430,12 +450,17 @@ func (m *Model) View(c *ui.Context) {
 	outer.Children(func() {
 		if m.animated != nil {
 			ui.Row(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-				ui.Image(c, m.animated.bitmapFor(
-					m.animated.imageFor(now, activity, m.dragging, m.reaction, m.tapAt, reduceMotion),
+				image := ui.Image(c, m.animated.bitmapFor(
+					m.animated.imageFor(now, activity, m.dragging, m.interactionID, m.interactionAt, reduceMotion),
 				)).
 					Size(float32(m.spriteWidth), float32(m.spriteHeight)).
 					Fit(ui.Contain).
-					Label("Lucia 桌宠")
+					Label("Lucia 桌宠").
+					TransformOrigin(0.5, 1)
+				if squash > 0 {
+					image.Scale(1+squash*0.5, 1-squash)
+				}
+				image.Translate(0, bob+lift)
 			})
 		} else {
 			ui.Row(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
@@ -451,7 +476,7 @@ func (m *Model) View(c *ui.Context) {
 				image.Translate(0, bob+lift)
 			})
 		}
-		if m.animated == nil || m.animated.faceClickable(m.dragging) {
+		if m.animated == nil || m.animated.hotzonesClickable(m.dragging) {
 			for _, zone := range m.Hotzones() {
 				zone := zone
 				ui.Box(c).Absolute().
@@ -467,7 +492,7 @@ func (m *Model) View(c *ui.Context) {
 	// Ask only for the frames this state needs. The view clock still derives
 	// every pose, so there is no ticker or background goroutine.
 	if m.animated != nil {
-		if delay := m.animated.nextDelay(now, activity, idle, m.tapAt, reduceMotion); delay > 0 {
+		if delay := m.animated.nextDelay(now, activity, idle, m.interactionAt, reduceMotion); delay > 0 {
 			c.After(delay)
 		}
 	} else if delay := nextFrameDelay(activity, idle, elapsed, reactionElapsed, m.reaction, reduceMotion); delay > 0 {
@@ -484,6 +509,24 @@ func motionFor(reduceMotion bool, elapsed time.Duration, reaction Reaction, reac
 	}
 	bob = float32(math.Sin(2*math.Pi*float64(elapsed)/float64(bobPeriod))) * bobAmplitude
 	squash, lift = reactionMotion(reaction, reactionElapsed)
+	return bob, squash, lift
+}
+
+func animatedMotion(reduceMotion bool, elapsed time.Duration, idleMotion, interactionMotion string, interactionAt, now time.Time) (bob, squash, lift float32) {
+	if reduceMotion {
+		return 0, 0, 0
+	}
+	if idleMotion == "bob" {
+		bob = float32(math.Sin(2*math.Pi*float64(elapsed)/float64(bobPeriod))) * bobAmplitude
+	}
+	motionElapsed := now.Sub(interactionAt)
+	switch interactionMotion {
+	case "squash":
+		squash = tapAmount(motionElapsed)
+	case "lift":
+		squash = headPatAmount(motionElapsed)
+		lift = -3 * squash
+	}
 	return bob, squash, lift
 }
 

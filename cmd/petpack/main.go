@@ -26,11 +26,10 @@ func main() {
 	force := flag.Bool("force", false, "replace an existing pack with the same id")
 	activate := flag.Bool("activate", true, "select this pack in settings.json")
 	checkDir := flag.String("check", "", "validate a pack directory and exit")
-	strict := flag.Bool("strict", false, "with -check, require schema 2 interaction data")
 	flag.Parse()
 
 	if *zipPath == "" && *checkDir == "" {
-		fmt.Fprintln(os.Stderr, "usage: petpack (-zip <pack.zip> | -check <pack-dir>) [-app <name> | -data <dir>] [-force] [-strict]")
+		fmt.Fprintln(os.Stderr, "usage: petpack (-zip <pack.zip> | -check <pack-dir>) [-app <name> | -data <dir>] [-force]")
 		os.Exit(2)
 	}
 	data := *dataDir
@@ -46,7 +45,7 @@ func main() {
 		data = paths.Data
 	}
 	if *checkDir != "" {
-		checkPack(*checkDir, *strict)
+		checkPack(*checkDir)
 		return
 	}
 	if err := os.MkdirAll(data, 0o755); err != nil {
@@ -64,7 +63,6 @@ func main() {
 			Sprite: petpack.Size{Width: 240, Height: 300},
 			Margin: 4,
 		},
-		Face:         petpack.Face{X: 0.34, Y: 0.06, Width: 0.32, Height: 0.20},
 		BubbleAnchor: petpack.Anchor{X: 0.5, Y: 0.05},
 		Force:        *force,
 	})
@@ -133,21 +131,10 @@ func detectAppName() string {
 	return existing[0].name
 }
 
-// checkPack validates one installed directory without importing it. The
-// strict mode is aimed at schema 2 authoring: it requires hotzones and
-// presets so a pack exercised in the console is not silently unclickable.
-func checkPack(dir string, strict bool) {
+// checkPack validates one installed directory without importing it.
+func checkPack(dir string) {
 	clean := filepath.Clean(dir)
 	id := filepath.Base(clean)
-	if strict {
-		raw, err := petpack.ReadRawManifest(clean, id)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := strictManifestError(id, raw); err != nil {
-			log.Fatal(err)
-		}
-	}
 	if _, err := petpack.ReadManifest(clean, id); err != nil {
 		log.Fatal(err)
 	}
@@ -159,20 +146,7 @@ func checkPack(dir string, strict bool) {
 	for _, clip := range pack.Clips {
 		frames += clip.FrameCount()
 	}
-	fmt.Printf("pack=%s schema=%d clips=%d frames=%d hotzones=%d presets=%d\n",
-		pack.Manifest.ID, pack.Manifest.Schema, len(pack.Clips), frames,
-		len(pack.Manifest.Hotzones), len(pack.Manifest.Presets))
-}
-
-func strictManifestError(id string, raw petpack.Manifest) error {
-	if raw.Schema != 2 {
-		return fmt.Errorf("petpack %q: strict check requires schema 2 on disk, got %d", id, raw.Schema)
-	}
-	if len(raw.Hotzones) == 0 {
-		return fmt.Errorf("petpack %q: strict check requires at least one explicit hotzone", id)
-	}
-	if len(raw.Presets) == 0 {
-		return fmt.Errorf("petpack %q: strict check requires at least one explicit preset", id)
-	}
-	return nil
+	fmt.Printf("pack=%s clips=%d frames=%d hotzones=%d interactions=%d\n",
+		pack.Manifest.ID, len(pack.Clips), frames,
+		len(pack.Manifest.Hotzones), len(pack.Manifest.Interactions))
 }

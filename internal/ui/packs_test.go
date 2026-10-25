@@ -24,15 +24,15 @@ func previewPNG(t *testing.T) []byte {
 
 func testPack(active bool) PackSummary {
 	return PackSummary{
-		ID: "tiny", Name: "Tiny", Schema: 2, Active: active, Valid: true,
-		Clips: 1, Frames: 3, Presets: 1, License: "local-only",
+		ID: "tiny", Name: "Tiny", Active: active, Valid: true,
+		Clips: 1, Frames: 3, Interactions: 1, License: "local-only",
 		Hotzones: []PackHotzone{{
-			ID: "face", Label: "摸摸脸", Preset: "tap", Action: "laugh",
+			ID: "face", Label: "摸摸脸", Interaction: "poke",
 			X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5,
 		}},
-		PresetList: []PackPreset{{
-			ID: "tap", Reaction: "face", Bubble: "face",
-			Steps: []PackPresetStep{{Action: "laugh"}},
+		InteractionList: []PackInteraction{{
+			ID: "poke", Label: "摸摸脸", Bubble: "face", Motion: "squash",
+			Steps: []PackInteractionStep{{Action: "laugh"}},
 		}},
 		ActionList: []PackAction{{
 			ID: "happy", Label: "开心", EnterHold: 40, ExitHold: 100,
@@ -53,8 +53,11 @@ func newPacksTestModel(t *testing.T, packs []PackSummary) (*Model, *int, *int) {
 			return packs, nil
 		},
 		LoadPackPreview: func(string) ([]byte, error) { return previewPNG(t), nil },
-		ImportPack: func(string, bool) (PackSummary, error) {
+		InstallPack: func(_ string, replace bool) (PackSummary, error) {
 			imports++
+			if !replace && len(packs) > 0 {
+				return PackSummary{}, &PackExistsError{ID: packs[0].ID, Name: packs[0].Name}
+			}
 			pack := testPack(true)
 			packs = []PackSummary{pack}
 			return pack, nil
@@ -125,9 +128,9 @@ func TestPacksPageShowsMetadataPreviewAndHotzones(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"素材包", "本地动画素材", "Tiny", "使用中", "schema 2",
-		"预览与热区", "摸摸脸", "预设 tap", "授权：local-only",
-		"交互预设", "laugh", "动作时序", "enter 40ms / loop 0ms / exit 100ms",
+		"素材包", "本地动画素材", "Tiny", "使用中",
+		"预览与热区", "摸摸脸", "交互 poke", "授权：local-only",
+		"交互", "laugh", "动作时序", "enter 40ms / loop 0ms / exit 100ms",
 	} {
 		if !tt.HasText(want) {
 			t.Errorf("packs page does not show %q; texts: %v", want, tt.Texts())
@@ -148,14 +151,9 @@ func TestPacksPageInvalidPackExplainsWhy(t *testing.T) {
 	}
 }
 
-func TestImportPackRequiresLicense(t *testing.T) {
+func TestImportPackNeedsNoLicenseGate(t *testing.T) {
 	model, imports, activations := newPacksTestModel(t, nil)
 	model.packZip = "tiny.zip"
-	model.importPack()
-	if *imports != 0 {
-		t.Fatal("import ran without the license checkbox")
-	}
-	model.packLicense = true
 	model.importPack()
 	if *imports != 1 || *activations != 1 {
 		t.Fatalf("imports=%d activations=%d, want 1/1", *imports, *activations)
@@ -165,19 +163,35 @@ func TestImportPackRequiresLicense(t *testing.T) {
 	}
 }
 
-func TestImportPackUsesReplaceWhenRequested(t *testing.T) {
-	model, imports, activations := newPacksTestModel(t, nil)
-	replaced := 0
-	model.cfg.ReplacePack = func(string, bool) (PackSummary, error) {
-		replaced++
-		return testPack(true), nil
+func TestImportPackConfirmsOnlyOnSameID(t *testing.T) {
+	model, imports, activations := newPacksTestModel(t, []PackSummary{testPack(true)})
+	confirmed := 0
+	model.cfg.ConfirmReplacePackAsync = func(id, name string, done func(bool)) {
+		confirmed++
+		if id != "tiny" || name != "Tiny" {
+			t.Fatalf("confirm id=%q name=%q", id, name)
+		}
+		done(true)
 	}
 	model.packZip = "tiny.zip"
-	model.packLicense = true
-	model.packReplace = true
 	model.importPack()
-	if replaced != 1 || *imports != 0 || *activations != 1 {
-		t.Fatalf("replaced=%d imports=%d activations=%d", replaced, *imports, *activations)
+	if confirmed != 1 || *imports != 2 || *activations != 1 {
+		t.Fatalf("confirmed=%d imports=%d activations=%d, want 1/2/1", confirmed, *imports, *activations)
+	}
+}
+
+func TestImportPackCancelLeavesPackAlone(t *testing.T) {
+	model, imports, activations := newPacksTestModel(t, []PackSummary{testPack(true)})
+	model.cfg.ConfirmReplacePackAsync = func(id, name string, done func(bool)) {
+		done(false)
+	}
+	model.packZip = "tiny.zip"
+	model.importPack()
+	if *imports != 1 || *activations != 0 || model.packBusy {
+		t.Fatalf("imports=%d activations=%d busy=%v", *imports, *activations, model.packBusy)
+	}
+	if model.packNotice == "" {
+		t.Fatal("cancel did not report a notice")
 	}
 }
 
@@ -193,12 +207,13 @@ func TestReplaceActivePackFallsBackToBuiltInWhenActivationFails(t *testing.T) {
 			return packs, nil
 		},
 		LoadPackPreview: func(string) ([]byte, error) { return previewPNG(t), nil },
-		ImportPack: func(string, bool) (PackSummary, error) {
+		InstallPack: func(_ string, replace bool) (PackSummary, error) {
+			if !replace {
+				return PackSummary{}, &PackExistsError{ID: "tiny", Name: "Tiny"}
+			}
 			return testPack(true), nil
 		},
-		ReplacePack: func(string, bool) (PackSummary, error) {
-			return testPack(true), nil
-		},
+		ConfirmReplacePackAsync: func(id, name string, done func(bool)) { done(true) },
 		ActivatePack: func(id string) error {
 			activated = append(activated, id)
 			if id != "" {
@@ -209,8 +224,6 @@ func TestReplaceActivePackFallsBackToBuiltInWhenActivationFails(t *testing.T) {
 	})
 	model.refreshPacks()
 	model.packZip = "tiny.zip"
-	model.packLicense = true
-	model.packReplace = true
 	model.importPack()
 	if len(activated) != 2 || activated[0] != "tiny" || activated[1] != "" {
 		t.Fatalf("activation calls = %v, want [tiny empty]", activated)
@@ -224,7 +237,6 @@ func TestImportPackKeepsImportedWhenActivationFails(t *testing.T) {
 	model, _, _ := newPacksTestModel(t, nil)
 	model.cfg.ActivatePack = func(string) error { return errors.New("boom") }
 	model.packZip = "tiny.zip"
-	model.packLicense = true
 	model.importPack()
 	if model.packActionErr == "" || model.packNotice == "" {
 		t.Fatalf("actionErr=%q notice=%q", model.packActionErr, model.packNotice)

@@ -1,41 +1,55 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
 )
 
+// PackExistsError is the UI-facing same-id conflict. The application maps
+// petpack.PackExistsError into this type so the UI package stays independent
+// of the storage layer.
+type PackExistsError struct {
+	ID   string
+	Name string
+}
+
+func (e *PackExistsError) Error() string {
+	return fmt.Sprintf("素材包 %q 已存在", e.ID)
+}
+
 // PackSummary is the console's view of one installed pack. It deliberately
 // contains no filesystem handles; the application layer owns petpack.Store.
 type PackSummary struct {
-	ID          string
-	Name        string
-	Schema      int
-	Active      bool
-	Valid       bool
-	Error       string
-	Clips       int
-	Frames      int
-	Hotzones    []PackHotzone
-	Presets     int
-	PresetList  []PackPreset
-	ActionList  []PackAction
-	License     string
-	InstalledAt string
+	ID              string
+	Name            string
+	Active          bool
+	Builtin         bool
+	Valid           bool
+	Error           string
+	Clips           int
+	Frames          int
+	Hotzones        []PackHotzone
+	Interactions    int
+	InteractionList []PackInteraction
+	ActionList      []PackAction
+	License         string
+	InstalledAt     string
 }
 
-// PackPreset is one reusable interaction sequence.
-type PackPreset struct {
-	ID       string
-	Reaction string
-	Bubble   string
-	Steps    []PackPresetStep
+// PackInteraction is one authored response.
+type PackInteraction struct {
+	ID     string
+	Label  string
+	Bubble string
+	Motion string
+	Steps  []PackInteractionStep
 }
 
-// PackPresetStep is one action and its delay before starting.
-type PackPresetStep struct {
+// PackInteractionStep is one action and its delay before starting.
+type PackInteractionStep struct {
 	Action  string
 	DelayMs int
 }
@@ -52,14 +66,13 @@ type PackAction struct {
 
 // PackHotzone is one normalized preview rectangle.
 type PackHotzone struct {
-	ID     string
-	Label  string
-	Preset string
-	Action string
-	X      float64
-	Y      float64
-	Width  float64
-	Height float64
+	ID          string
+	Label       string
+	Interaction string
+	X           float64
+	Y           float64
+	Width       float64
+	Height      float64
 }
 
 func (m *Model) packsPage(c *ui.Context) {
@@ -129,8 +142,8 @@ func (m *Model) packRow(c *ui.Context, pack PackSummary) {
 					}
 				})
 				if pack.Valid {
-					ui.Textf(c, "schema %d · %d 个动画 · %d 帧 · %d 个热区 · %d 个预设 · 授权 %s",
-						pack.Schema, pack.Clips, pack.Frames, len(pack.Hotzones), pack.Presets, pack.License).
+					ui.Textf(c, "%d 个动画 · %d 帧 · %d 个热区 · %d 个交互 · 授权 %s",
+						pack.Clips, pack.Frames, len(pack.Hotzones), pack.Interactions, pack.License).
 						FontSize(11).TextColor(t.TextMuted)
 				} else {
 					ui.Text(c, pack.Error).FontSize(11).TextColor(t.Danger).Selectable()
@@ -155,7 +168,7 @@ func (m *Model) packRow(c *ui.Context, pack PackSummary) {
 }
 
 func (m *Model) packImportPanel(c *ui.Context) {
-	if (m.cfg.ChoosePackZip == nil && m.cfg.ChoosePackZipAsync == nil) || m.cfg.ImportPack == nil {
+	if (m.cfg.ChoosePackZip == nil && m.cfg.ChoosePackZipAsync == nil) || m.cfg.InstallPack == nil {
 		return
 	}
 	t := c.Theme()
@@ -173,14 +186,8 @@ func (m *Model) packImportPanel(c *ui.Context) {
 				m.choosePackZip()
 			}
 		})
-		ui.Checkbox(c, &m.packLicense, "我确认拥有该素材包的本地使用授权，且不会再分发其中的美术资源").
-			Label("素材包授权确认")
-		if m.cfg.ReplacePack != nil {
-			ui.Checkbox(c, &m.packReplace, "替换同名素材包（失败会回滚到旧版本）").
-				Label("替换同名素材包")
-		}
 		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-			if ui.PrimaryButton(c, "导入并启用").Disabled(m.packBusy || m.packZip == "" || !m.packLicense).Clicked() {
+			if ui.PrimaryButton(c, "导入并启用").Disabled(m.packBusy || m.packZip == "").Clicked() {
 				m.importPack()
 			}
 			ui.Text(c, "导入过程中窗口可能短暂卡顿；完成后素材包立即生效。").
@@ -214,7 +221,7 @@ func (m *Model) packPreviewPanel(c *ui.Context) {
 			m.packPreviewImage(c)
 			ui.Column(c).Gap(7).Grow(1).Children(func() {
 				ui.Text(c, pack.Name).FontSize(15).Bold()
-				ui.Textf(c, "%s · schema %d", pack.ID, pack.Schema).FontSize(11).TextColor(t.TextMuted)
+				ui.Text(c, pack.ID).FontSize(11).TextColor(t.TextMuted)
 				ui.Textf(c, "授权：%s", pack.License).FontSize(12).TextColor(t.TextMuted)
 				if pack.InstalledAt != "" {
 					ui.Textf(c, "安装于：%s", pack.InstalledAt).FontSize(12).TextColor(t.TextMuted)
@@ -229,19 +236,19 @@ func (m *Model) packPreviewPanel(c *ui.Context) {
 						if label == "" {
 							label = zone.ID
 						}
-						action := zone.Action
-						if action == "" {
-							action = "使用预设动作"
-						}
-						ui.Textf(c, "· %s：预设 %s，动作 %s", label, zone.Preset, action).
+						ui.Textf(c, "· %s：交互 %s", label, zone.Interaction).
 							FontSize(12).TextColor(t.TextMuted)
 					}
 				}
-				if len(pack.PresetList) > 0 {
-					ui.Text(c, "交互预设").FontSize(12).Bold()
-					for _, preset := range pack.PresetList {
-						ui.Textf(c, "· %s（%s/%s）：%s", preset.ID, preset.Reaction, preset.Bubble,
-							presetStepsText(preset.Steps)).FontSize(12).TextColor(t.TextMuted)
+				if len(pack.InteractionList) > 0 {
+					ui.Text(c, "交互").FontSize(12).Bold()
+					for _, interaction := range pack.InteractionList {
+						label := interaction.Label
+						if label == "" {
+							label = interaction.ID
+						}
+						ui.Textf(c, "· %s：%s（%s/%s）", label, interactionStepsText(interaction.Steps),
+							interaction.Bubble, interaction.Motion).FontSize(12).TextColor(t.TextMuted)
 					}
 				}
 				if timed := timedActions(pack.ActionList); len(timed) > 0 {
@@ -392,7 +399,6 @@ func (m *Model) choosePackZip() {
 				return
 			}
 			m.packZip = path
-			m.packLicense = false
 			m.packActionErr = ""
 			m.packNotice = ""
 		})
@@ -410,7 +416,6 @@ func (m *Model) choosePackZip() {
 		return
 	}
 	m.packZip = path
-	m.packLicense = false
 	m.packActionErr = ""
 	m.packNotice = ""
 }
@@ -435,20 +440,36 @@ func (m *Model) confirmDeletePack(id, name string) {
 }
 
 func (m *Model) importPack() {
-	if m.cfg.ImportPack == nil || m.packZip == "" || !m.packLicense {
+	if m.cfg.InstallPack == nil || m.packZip == "" || m.packBusy {
 		return
 	}
+	m.packBusy = true
+	m.packActionErr = ""
+	m.packNotice = ""
+	m.installPack(false)
+}
+
+func (m *Model) installPack(replace bool) {
 	previousActive := m.activePackID()
-	importFn := m.cfg.ImportPack
-	if m.packReplace && m.cfg.ReplacePack != nil {
-		importFn = m.cfg.ReplacePack
-	}
-	pack, err := importFn(m.packZip, m.packLicense)
+	pack, err := m.cfg.InstallPack(m.packZip, replace)
 	if err != nil {
+		var exists *PackExistsError
+		if !replace && errors.As(err, &exists) && m.cfg.ConfirmReplacePackAsync != nil {
+			m.cfg.ConfirmReplacePackAsync(exists.ID, exists.Name, func(ok bool) {
+				if !ok {
+					m.packBusy = false
+					m.packNotice = "已取消导入，未修改任何素材包。"
+					return
+				}
+				m.installPack(true)
+			})
+			return
+		}
+		m.packBusy = false
 		m.packActionErr = fmt.Sprintf("导入素材包失败：%v", err)
-		m.packNotice = ""
 		return
 	}
+	m.packBusy = false
 	m.packActionErr = ""
 	m.packNotice = fmt.Sprintf("已导入 %s，正在启用…", pack.Name)
 	m.packSelected = pack.ID
@@ -467,8 +488,6 @@ func (m *Model) importPack() {
 		m.packNotice = fmt.Sprintf("已导入并启用 %s。", pack.Name)
 	}
 	m.packZip = ""
-	m.packLicense = false
-	m.packReplace = false
 	m.packsLoaded = false
 	m.packPreviewID = ""
 	m.refreshPacks()
@@ -510,7 +529,7 @@ func (m *Model) deletePack(id string) {
 	m.refreshPacks()
 }
 
-func presetStepsText(steps []PackPresetStep) string {
+func interactionStepsText(steps []PackInteractionStep) string {
 	parts := make([]string, 0, len(steps))
 	for _, step := range steps {
 		if step.DelayMs > 0 {
@@ -520,7 +539,7 @@ func presetStepsText(steps []PackPresetStep) string {
 		}
 	}
 	if len(parts) == 0 {
-		return "使用热区动作"
+		return "仅播放宿主反馈"
 	}
 	return strings.Join(parts, " → ")
 }

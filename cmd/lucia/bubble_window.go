@@ -16,7 +16,6 @@ import (
 type bubbleWindow struct {
 	win        *mygo.Window
 	model      *pet.BubbleModel
-	seq        int
 	hideTimer  *time.Timer
 	generation atomic.Int64
 }
@@ -58,9 +57,8 @@ func (b *bubbleWindow) handleClose(e *mygo.CloseEvent, quitting func() bool) {
 	b.Hide()
 }
 
-// Show selects the next line for reaction, places the bubble relative to the
-// pet, and starts its lifetime.
-func (b *bubbleWindow) Show(reaction pet.Reaction, petRect pet.Rect, displays []pet.Display) {
+// Show places one authored line relative to the pet and starts its lifetime.
+func (b *bubbleWindow) Show(text string, petRect pet.Rect, displays []pet.Display) {
 	if b == nil || b.win == nil || b.win.IsDestroyed() {
 		return
 	}
@@ -69,11 +67,9 @@ func (b *bubbleWindow) Show(reaction pet.Reaction, petRect pet.Rect, displays []
 	if runtime.GOOS == "linux" {
 		return
 	}
-	text := pet.BubbleLine(reaction, b.seq)
 	if text == "" {
 		return
 	}
-	b.seq++
 	// Invalidate the previous lifetime before showing the new line, so an
 	// old timer cannot hide the new bubble while it is being placed.
 	generation := b.generation.Add(1)

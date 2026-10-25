@@ -453,16 +453,16 @@ func TestTapAmount(t *testing.T) {
 	}
 }
 
-func TestReactionHandlerReceivesReaction(t *testing.T) {
+func TestBubbleHandlerReceivesAuthoredLine(t *testing.T) {
 	m, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got Reaction
-	m.SetReactionHandler(func(reaction Reaction) { got = reaction })
-	m.React(ReactionHeadPat)
-	if got != ReactionHeadPat {
-		t.Fatalf("handler reaction = %v, want ReactionHeadPat", got)
+	var got BubbleEvent
+	m.SetBubbleHandler(func(event BubbleEvent) { got = event })
+	m.TriggerInteraction("poke")
+	if got.Text == "" {
+		t.Fatal("bubble handler received no line")
 	}
 }
 

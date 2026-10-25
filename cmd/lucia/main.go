@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -180,19 +181,35 @@ func main() {
 				parent.Update(func() { done(path, err) })
 			}()
 		},
-		ImportPack: func(zipPath string, acceptLicense bool) (appui.PackSummary, error) {
-			summary, err := packStore.Import(zipPath, acceptLicense)
+		InstallPack: func(zipPath string, replace bool) (appui.PackSummary, error) {
+			summary, err := packStore.Install(zipPath, replace)
 			if err != nil {
+				var exists *petpack.PackExistsError
+				if errors.As(err, &exists) {
+					return appui.PackSummary{}, &appui.PackExistsError{ID: exists.ID, Name: exists.Name}
+				}
 				return appui.PackSummary{}, err
 			}
 			return uiPackSummary(summary), nil
 		},
-		ReplacePack: func(zipPath string, acceptLicense bool) (appui.PackSummary, error) {
-			summary, err := packStore.Replace(zipPath, acceptLicense)
-			if err != nil {
-				return appui.PackSummary{}, err
-			}
-			return uiPackSummary(summary), nil
+		ConfirmReplacePackAsync: func(id, name string, done func(bool)) {
+			parent := win
+			go func() {
+				res, err := mygo.Dialog.Message(mygo.MessageOptions{
+					Parent:        parent,
+					Type:          mygo.MessageWarning,
+					Title:         "替换素材包",
+					Message:       fmt.Sprintf("替换已安装的“%s”（%s）？", name, id),
+					Detail:        "新版本会先完整校验，失败时回滚到旧版本。",
+					Buttons:       []string{"替换", "取消"},
+					DefaultButton: 1,
+					CancelButton:  1,
+				})
+				if parent == nil || parent.IsDestroyed() {
+					return
+				}
+				parent.Update(func() { done(err == nil && res.Button == 0) })
+			}()
 		},
 		ActivatePack: func(id string) error {
 			if activatePetPack == nil {
@@ -280,11 +297,11 @@ func main() {
 			Hide:  togglePet,
 			Reset: resetPet,
 		})
-		m.SetReactionHandler(func(reaction pet.Reaction) {
+		m.SetBubbleHandler(func(event pet.BubbleEvent) {
 			if petWin == nil || !petWin.IsVisible() {
 				return
 			}
-			if prefs.SoundEnabled {
+			if prefs.SoundEnabled && event.Sound {
 				playPetSound(petSound)
 			}
 			now := time.Now()
@@ -292,7 +309,7 @@ func main() {
 				return
 			}
 			lastBubble = now
-			bubbleWin.Show(reaction, petWin.BubbleRect(), currentPetDisplays())
+			bubbleWin.Show(event.Text, petWin.BubbleRect(), currentPetDisplays())
 		})
 	}
 	configurePetModel(petModel)
