@@ -16,6 +16,8 @@ func TestUpdateUISettingsPreservesRuntimeFields(t *testing.T) {
 
 	ui := initial
 	ui.SoundEnabled = true
+	ui.Theme = settings.ThemeLight
+	ui.BubbleTheme = settings.BubbleThemeDark
 	ui.PetIntroPlayed = false
 	ui.PetPack = ""
 
@@ -23,8 +25,8 @@ func TestUpdateUISettingsPreservesRuntimeFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("updateUISettings: %v", err)
 	}
-	if !got.SoundEnabled {
-		t.Fatal("UI field was not saved")
+	if !got.SoundEnabled || got.Theme != settings.ThemeLight || got.BubbleTheme != settings.BubbleThemeDark {
+		t.Fatalf("UI fields were not saved: sound=%v theme=%q bubble=%q", got.SoundEnabled, got.Theme, got.BubbleTheme)
 	}
 	if got.PetPack != "naiwa" || !got.PetIntroPlayed {
 		t.Fatalf("runtime fields changed: pack=%q intro=%v", got.PetPack, got.PetIntroPlayed)

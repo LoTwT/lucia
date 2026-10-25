@@ -25,6 +25,12 @@ func TestLoadMissingUsesDefaults(t *testing.T) {
 	if got.BubbleCooldownSeconds != 0 {
 		t.Errorf("bubble cooldown = %d, want 0", got.BubbleCooldownSeconds)
 	}
+	if got.Theme != ThemeSystem {
+		t.Errorf("theme = %q, want %q", got.Theme, ThemeSystem)
+	}
+	if got.BubbleTheme != BubbleThemeApp {
+		t.Errorf("bubble theme = %q, want %q", got.BubbleTheme, BubbleThemeApp)
+	}
 	if got.PetScale != 1 {
 		t.Errorf("pet scale = %v, want 1", got.PetScale)
 	}
@@ -51,6 +57,12 @@ func TestLoadMergesNewFieldsWithDefaults(t *testing.T) {
 	if got.SoundEnabled || got.BubbleCooldownSeconds != 0 {
 		t.Errorf("missing bubble fields = sound %v, cooldown %d; want false, 0", got.SoundEnabled, got.BubbleCooldownSeconds)
 	}
+	if got.Theme != ThemeSystem {
+		t.Errorf("a missing theme field must follow the system, got %q", got.Theme)
+	}
+	if got.BubbleTheme != BubbleThemeApp {
+		t.Errorf("a missing bubbleTheme field must follow the application, got %q", got.BubbleTheme)
+	}
 	if got.PetScale != 1 {
 		t.Errorf("a missing petScale field must keep the default 1, got %v", got.PetScale)
 	}
@@ -70,6 +82,20 @@ func TestLoadNormalizesZeroPetScale(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesUnknownThemes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, File), []byte(`{"theme":"sepia","bubbleTheme":"sepia"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Theme != ThemeSystem || got.BubbleTheme != BubbleThemeApp {
+		t.Fatalf("themes = %q/%q, want %q/%q", got.Theme, got.BubbleTheme, ThemeSystem, BubbleThemeApp)
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	want := Default()
@@ -77,6 +103,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	want.PetVisible = false
 	want.SoundEnabled = true
 	want.BubbleCooldownSeconds = 30
+	want.Theme = ThemeLight
+	want.BubbleTheme = BubbleThemeDark
 	want.PetScale = 1.25
 	want.PetPack = "naiwa"
 	want.PetIntroPlayed = true

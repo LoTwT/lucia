@@ -81,6 +81,7 @@ func main() {
 		log.Printf("lucia: settings: %v (using defaults)", err)
 	}
 	log.Printf("lucia: settings: check updates on launch=%v", prefs.CheckUpdatesOnLaunch)
+	mygo.Theme.SetSource(themeSourceForPreference(prefs.Theme))
 	settingsStore := settings.NewStore(paths.Data, prefs)
 	if petpack.IsReservedPackID(prefs.PetPack) {
 		updated, updateErr := settingsStore.Update(func(s *settings.Settings) { s.PetPack = "" })
@@ -154,6 +155,14 @@ func main() {
 		ApplyPetScale: func(scale float64) {
 			bubbleWin.Hide()
 			petWin.ApplyScale(scale)
+		},
+		ApplyTheme: func(theme string) {
+			mygo.Theme.SetSource(themeSourceForPreference(theme))
+		},
+		ApplyBubbleTheme: func(theme string) {
+			if bubbleWin != nil {
+				bubbleWin.SetTheme(bubbleThemeForPreference(theme))
+			}
 		},
 		OpenAtLogin:    func() bool { return mygo.App.OpenAtLogin() },
 		SetOpenAtLogin: func(open bool) error { return mygo.App.SetOpenAtLogin(open) },
@@ -453,6 +462,7 @@ func main() {
 			petModel.TriggerEvent("intro")
 		}
 		bubbleWin = newBubbleWindow(func() bool { return quitting })
+		bubbleWin.SetTheme(bubbleThemeForPreference(prefs.BubbleTheme))
 		petWin.SetOnMove(func() { bubbleWin.Hide() })
 		petWin.SetOnHide(func() {
 			bubbleWin.Hide()
@@ -576,6 +586,8 @@ func updateUISettings(store *settings.Store, next settings.Settings) (settings.S
 		cur.PetScale = next.PetScale
 		cur.SoundEnabled = next.SoundEnabled
 		cur.BubbleCooldownSeconds = next.BubbleCooldownSeconds
+		cur.Theme = next.Theme
+		cur.BubbleTheme = next.BubbleTheme
 	})
 }
 

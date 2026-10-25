@@ -14,6 +14,19 @@ import (
 // File is the settings file's name in the data directory.
 const File = "settings.json"
 
+// Theme values persisted in Settings.Theme and Settings.BubbleTheme.
+const (
+	ThemeSystem = "system"
+	ThemeLight  = "light"
+	ThemeDark   = "dark"
+
+	// BubbleThemeApp reuses the persisted "system" value for compatibility
+	// while meaning "follow the application theme."
+	BubbleThemeApp   = ThemeSystem
+	BubbleThemeLight = ThemeLight
+	BubbleThemeDark  = ThemeDark
+)
+
 // Settings is the persisted preference set.
 type Settings struct {
 	// CheckUpdatesOnLaunch runs an update check when the app starts and
@@ -29,6 +42,13 @@ type Settings struct {
 	// BubbleCooldownSeconds limits how often a speech bubble appears:
 	// 0 every interaction, a positive number the minimum gap, -1 off.
 	BubbleCooldownSeconds int `json:"bubbleCooldownSeconds"`
+	// Theme selects the application's appearance: follow the system, always
+	// light, or always dark. Empty and unknown values follow the system.
+	Theme string `json:"theme,omitempty"`
+	// BubbleTheme selects the speech bubble's appearance: follow the
+	// application, always light, or always dark. Empty and unknown values
+	// follow the application.
+	BubbleTheme string `json:"bubbleTheme,omitempty"`
 	// PetScale scales the pet window and sprite together. Invalid values are
 	// clamped by the pet model; the default is 1.0.
 	PetScale float64 `json:"petScale"`
@@ -45,6 +65,8 @@ func Default() Settings {
 	return Settings{
 		CheckUpdatesOnLaunch: true,
 		PetVisible:           true,
+		Theme:                ThemeSystem,
+		BubbleTheme:          BubbleThemeApp,
 		PetScale:             1.0,
 	}
 }
@@ -70,7 +92,18 @@ func Load(dir string) (Settings, error) {
 	if s.PetScale <= 0 {
 		s.PetScale = 1.0
 	}
+	s.Theme = normalizeTheme(s.Theme)
+	s.BubbleTheme = normalizeTheme(s.BubbleTheme)
 	return s, nil
+}
+
+func normalizeTheme(theme string) string {
+	switch theme {
+	case ThemeLight, ThemeDark:
+		return theme
+	default:
+		return ThemeSystem
+	}
 }
 
 // Save writes the settings atomically, so a crash mid-write leaves either
@@ -79,6 +112,8 @@ func Save(dir string, s Settings) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create the settings directory: %w", err)
 	}
+	s.Theme = normalizeTheme(s.Theme)
+	s.BubbleTheme = normalizeTheme(s.BubbleTheme)
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode the settings: %w", err)

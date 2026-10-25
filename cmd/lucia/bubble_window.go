@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/LoTwT/lucia/internal/pet"
+	"github.com/LoTwT/lucia/internal/settings"
 	"github.com/egoist/mygo"
 	mgui "github.com/egoist/mygo/ui"
 )
@@ -46,6 +47,40 @@ func newBubbleWindow(quitting func() bool) *bubbleWindow {
 	return b
 }
 
+// SetTheme applies the console's bubble appearance preference. It also
+// repaints a visible bubble so a theme change takes effect immediately.
+func (b *bubbleWindow) SetTheme(theme pet.BubbleTheme) {
+	if b == nil || b.model == nil {
+		return
+	}
+	b.model.SetTheme(theme)
+	if b.win != nil && !b.win.IsDestroyed() {
+		b.win.Update(func() {})
+	}
+}
+
+func themeSourceForPreference(value string) mygo.ThemeSource {
+	switch value {
+	case settings.ThemeLight:
+		return mygo.ThemeLight
+	case settings.ThemeDark:
+		return mygo.ThemeDark
+	default:
+		return mygo.ThemeSystem
+	}
+}
+
+func bubbleThemeForPreference(value string) pet.BubbleTheme {
+	switch value {
+	case settings.BubbleThemeLight:
+		return pet.BubbleThemeLight
+	case settings.BubbleThemeDark:
+		return pet.BubbleThemeDark
+	default:
+		return pet.BubbleThemeApp
+	}
+}
+
 // handleClose keeps the bubble as a hide-on-close window during normal use,
 // but lets MyGo's quit sequence close it. Otherwise prepareQuit would cancel
 // the whole quit after the pet window had already been destroyed.
@@ -78,7 +113,7 @@ func (b *bubbleWindow) Show(text string, petRect pet.Rect, displays []pet.Displa
 		b.hideTimer = nil
 	}
 	placement := pet.PlaceBubble(petRect, displays)
-	b.model.SetContent(text, placement.Side, placement.TailX)
+	b.model.SetContent(text, placement.Side)
 	b.win.SetPosition(placement.X, placement.Y)
 	b.win.Update(func() {})
 	b.win.ShowInactive()

@@ -39,6 +39,14 @@ type Config struct {
 	// ApplyPetScale resizes the desktop pet after the preference changes.
 	// Nil keeps the preference only in tests or embedded hosts.
 	ApplyPetScale func(float64)
+	// ApplyTheme applies the application's light/dark appearance after the
+	// preference changes. Nil keeps the preference only in tests or embedded
+	// hosts.
+	ApplyTheme func(string)
+	// ApplyBubbleTheme reapplies the speech bubble appearance after the
+	// preference changes. Nil keeps the preference only in tests or embedded
+	// hosts.
+	ApplyBubbleTheme func(string)
 	// OpenAtLogin reports the login item state. Nil hides the control.
 	OpenAtLogin func() bool
 	// SetOpenAtLogin changes the login item. Nil hides the control.
@@ -101,6 +109,10 @@ type Model struct {
 	openAtLoginKnown bool
 	// bubbleChoice is the label selected in the bubble frequency control.
 	bubbleChoice string
+	// themeChoice is the label selected in the application theme control.
+	themeChoice string
+	// bubbleThemeChoice is the label selected in the bubble theme control.
+	bubbleThemeChoice string
 	// petScaleChoice is the label selected in the pet size control.
 	petScaleChoice string
 	// Pack management state. Packs are refreshed explicitly so the view
@@ -123,11 +135,13 @@ type Model struct {
 // New creates the window model on the overview page.
 func New(cfg Config) *Model {
 	return &Model{
-		cfg:            cfg,
-		page:           PageOverview,
-		settings:       cfg.Settings,
-		bubbleChoice:   bubbleChoiceFor(cfg.Settings.BubbleCooldownSeconds),
-		petScaleChoice: petScaleChoiceFor(cfg.Settings.PetScale),
+		cfg:               cfg,
+		page:              PageOverview,
+		settings:          cfg.Settings,
+		themeChoice:       themeChoiceFor(cfg.Settings.Theme),
+		bubbleChoice:      bubbleChoiceFor(cfg.Settings.BubbleCooldownSeconds),
+		bubbleThemeChoice: bubbleThemeChoiceFor(cfg.Settings.BubbleTheme),
+		petScaleChoice:    petScaleChoiceFor(cfg.Settings.PetScale),
 	}
 }
 
@@ -329,6 +343,74 @@ func bubbleSeconds(choice string) int {
 	}
 }
 
+var themeChoices = []string{"跟随系统", "浅色", "深色"}
+
+func themeChoiceFor(theme string) string {
+	switch theme {
+	case settings.ThemeLight:
+		return themeChoices[1]
+	case settings.ThemeDark:
+		return themeChoices[2]
+	default:
+		return themeChoices[0]
+	}
+}
+
+func themeForChoice(choice string) string {
+	switch choice {
+	case "浅色":
+		return settings.ThemeLight
+	case "深色":
+		return settings.ThemeDark
+	default:
+		return settings.ThemeSystem
+	}
+}
+
+var bubbleThemeChoices = []string{"跟随应用", "浅色", "深色"}
+
+func bubbleThemeChoiceFor(theme string) string {
+	switch theme {
+	case settings.BubbleThemeLight:
+		return bubbleThemeChoices[1]
+	case settings.BubbleThemeDark:
+		return bubbleThemeChoices[2]
+	default:
+		return bubbleThemeChoices[0]
+	}
+}
+
+func bubbleThemeForChoice(choice string) string {
+	switch choice {
+	case "浅色":
+		return settings.BubbleThemeLight
+	case "深色":
+		return settings.BubbleThemeDark
+	default:
+		return settings.BubbleThemeApp
+	}
+}
+
+// bubbleThemeHint states the result of the bubble preference instead of
+// making the user infer what "follow the app" means in the current theme.
+func bubbleThemeHint(theme, bubbleTheme string) string {
+	switch bubbleTheme {
+	case settings.BubbleThemeLight:
+		return "固定为浅色，不受应用主题影响。"
+	case settings.BubbleThemeDark:
+		return "固定为深色，不受应用主题影响。"
+	default:
+		switch theme {
+		case settings.ThemeLight:
+			return "跟随上方的主题模式；当前为浅色。"
+		case settings.ThemeDark:
+			return "跟随上方的主题模式；当前为深色。"
+		default:
+			return "跟随上方的主题模式；当前随系统切换。"
+		}
+	}
+}
+
 // SetPetVisible keeps the console's copy in sync when the tray toggles the
 // pet. It also persists the new state.
 func (m *Model) SetPetVisible(visible bool) {
@@ -341,87 +423,138 @@ func (m *Model) SetPetVisible(visible bool) {
 
 func (m *Model) petCard(c *ui.Context) {
 	t := c.Theme()
-	panel(c, "", func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "显示桌宠").FontSize(14)
-				ui.Text(c, "隐藏后可从托盘重新显示；重启后保持当前选择。").FontSize(12).
-					TextColor(t.TextMuted)
-			})
-			ui.Switch(c, &m.settings.PetVisible).Label("显示桌宠").OnChange(func() {
-				m.saveSettings()
-				if m.cfg.ApplyPetVisible != nil {
-					m.cfg.ApplyPetVisible(m.settings.PetVisible)
-				}
-			})
-		})
-
-		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "桌宠大小").FontSize(14)
-				ui.Text(c, "同时缩放窗口、立绘和脸部互动区域。").FontSize(12).
-					TextColor(t.TextMuted)
-			})
-			if ui.Select(c, &m.petScaleChoice, petScaleChoices).Label("桌宠大小").Width(170).Changed() {
-				m.settings.PetScale = petScaleForChoice(m.petScaleChoice)
-				m.saveSettings()
-				if m.cfg.ApplyPetScale != nil {
-					m.cfg.ApplyPetScale(m.settings.PetScale)
-				}
-			}
-		})
-
-		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "互动音效").FontSize(14)
-				ui.Text(c, "摸脸和摸摸头时播放一小段提示音。").FontSize(12).
-					TextColor(t.TextMuted)
-			})
-			ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(m.saveSettings)
-		})
-
-		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "气泡频率").FontSize(14)
-				ui.Text(c, "限制两次台词气泡之间的最短间隔；关闭后只保留动作和音效。").FontSize(12).
-					TextColor(t.TextMuted)
-			})
-			if ui.Select(c, &m.bubbleChoice, bubbleChoices).Label("气泡频率").Width(170).Changed() {
-				m.settings.BubbleCooldownSeconds = bubbleSeconds(m.bubbleChoice)
-				m.saveSettings()
-			}
-		})
-
-		if m.cfg.OpenAtLogin != nil && m.cfg.SetOpenAtLogin != nil {
-			if !m.openAtLoginKnown {
-				m.openAtLogin = m.cfg.OpenAtLogin()
-				m.openAtLoginKnown = true
-			}
+	ui.Column(c).Gap(16).Children(func() {
+		settingsGroup(c, "显示", func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
 				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					ui.Text(c, "开机自启").FontSize(14)
-					ui.Text(c, "登录系统后自动启动 Lucia 和桌宠。").FontSize(12).TextColor(t.TextMuted)
-				})
-				ui.Switch(c, &m.openAtLogin).Label("开机自启").OnChange(func() {
-					m.setOpenAtLogin(m.openAtLogin)
-				})
-			})
-		}
-
-		if m.cfg.ResetPetPosition != nil {
-			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					ui.Text(c, "桌宠位置").FontSize(14)
-					ui.Text(c, "移回主屏右下角；隐藏时会重新显示。").FontSize(12).
+					ui.Text(c, "主题模式").FontSize(14)
+					ui.Text(c, "控制 Lucia 窗口与控件的明暗外观。").FontSize(12).
 						TextColor(t.TextMuted)
 				})
-				if ui.Button(c, "重置").Clicked() {
-					m.settings.PetVisible = true
+				if ui.Select(c, &m.themeChoice, themeChoices).Label("主题模式").Width(170).Changed() {
+					m.settings.Theme = themeForChoice(m.themeChoice)
 					m.saveSettings()
-					m.cfg.ResetPetPosition()
+					if m.cfg.ApplyTheme != nil {
+						m.cfg.ApplyTheme(m.settings.Theme)
+					}
+				}
+			})
+
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "显示桌宠").FontSize(14)
+					ui.Text(c, "隐藏后可从托盘重新显示；重启后保持当前选择。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				ui.Switch(c, &m.settings.PetVisible).Label("显示桌宠").OnChange(func() {
+					m.saveSettings()
+					if m.cfg.ApplyPetVisible != nil {
+						m.cfg.ApplyPetVisible(m.settings.PetVisible)
+					}
+				})
+			})
+
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "桌宠大小").FontSize(14)
+					ui.Text(c, "同时缩放窗口、立绘和脸部互动区域。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				if ui.Select(c, &m.petScaleChoice, petScaleChoices).Label("桌宠大小").Width(170).Changed() {
+					m.settings.PetScale = petScaleForChoice(m.petScaleChoice)
+					m.saveSettings()
+					if m.cfg.ApplyPetScale != nil {
+						m.cfg.ApplyPetScale(m.settings.PetScale)
+					}
+				}
+			})
+		})
+
+		settingsGroup(c, "气泡", func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "气泡主题").FontSize(14)
+					ui.Text(c, bubbleThemeHint(m.settings.Theme, m.settings.BubbleTheme)).FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				if ui.Select(c, &m.bubbleThemeChoice, bubbleThemeChoices).Label("气泡主题").Width(170).Changed() {
+					m.settings.BubbleTheme = bubbleThemeForChoice(m.bubbleThemeChoice)
+					m.saveSettings()
+					if m.cfg.ApplyBubbleTheme != nil {
+						m.cfg.ApplyBubbleTheme(m.settings.BubbleTheme)
+					}
+				}
+			})
+
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "气泡频率").FontSize(14)
+					ui.Text(c, "限制两次台词气泡之间的最短间隔；关闭后只保留动作和音效。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				if ui.Select(c, &m.bubbleChoice, bubbleChoices).Label("气泡频率").Width(170).Changed() {
+					m.settings.BubbleCooldownSeconds = bubbleSeconds(m.bubbleChoice)
+					m.saveSettings()
+				}
+			})
+		})
+
+		settingsGroup(c, "互动", func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "互动音效").FontSize(14)
+					ui.Text(c, "摸脸和摸摸头时播放一小段提示音。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(m.saveSettings)
+			})
+		})
+
+		if (m.cfg.OpenAtLogin != nil && m.cfg.SetOpenAtLogin != nil) || m.cfg.ResetPetPosition != nil {
+			settingsGroup(c, "系统", func() {
+				if m.cfg.OpenAtLogin != nil && m.cfg.SetOpenAtLogin != nil {
+					if !m.openAtLoginKnown {
+						m.openAtLogin = m.cfg.OpenAtLogin()
+						m.openAtLoginKnown = true
+					}
+					ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+						ui.Column(c).Gap(2).Grow(1).Children(func() {
+							ui.Text(c, "开机自启").FontSize(14)
+							ui.Text(c, "登录系统后自动启动 Lucia 和桌宠。").FontSize(12).TextColor(t.TextMuted)
+						})
+						ui.Switch(c, &m.openAtLogin).Label("开机自启").OnChange(func() {
+							m.setOpenAtLogin(m.openAtLogin)
+						})
+					})
+				}
+
+				if m.cfg.ResetPetPosition != nil {
+					ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+						ui.Column(c).Gap(2).Grow(1).Children(func() {
+							ui.Text(c, "桌宠位置").FontSize(14)
+							ui.Text(c, "移回主屏右下角；隐藏时会重新显示。").FontSize(12).
+								TextColor(t.TextMuted)
+						})
+						if ui.Button(c, "重置").Clicked() {
+							m.settings.PetVisible = true
+							m.saveSettings()
+							m.cfg.ResetPetPosition()
+						}
+					})
 				}
 			})
 		}
+	})
+}
+
+// settingsGroup puts the section heading outside its card so the page reads
+// as a series of independent settings groups rather than one long form.
+func settingsGroup(c *ui.Context, title string, body func()) {
+	t := c.Theme()
+	ui.Column(c).Gap(5).Children(func() {
+		ui.Text(c, title).FontSize(13).Bold().TextColor(t.TextMuted)
+		ui.Column(c).Padding(10, 16).Gap(11).Radius(10).
+			Background(t.Background).Border(1, t.Border).Children(body)
 	})
 }
 

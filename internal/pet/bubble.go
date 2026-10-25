@@ -7,20 +7,25 @@ import (
 )
 
 // BubbleWidth and BubbleHeight are the fixed size of the speech bubble
-// window. A fixed canvas keeps text wrapping and positioning predictable.
-// The extra height below the card leaves room for the tail.
+// window. The card is smaller than the window so its custom shadow has room
+// to fade out; a fixed canvas keeps text wrapping and placement predictable.
 const (
-	BubbleWidth      = 240
-	BubbleHeight     = 100
-	bubbleGap        = 8
-	bubbleInset      = 6
-	bubbleTailHeight = 14
-	bubbleTailHalf   = 9
-	bubbleCardRadius = 18
+	bubbleCardWidth  = 228
+	bubbleCardHeight = 88
+	bubbleCardRadius = 14
+	bubbleSideInset  = 18
+	// The card sits close to the pet. The asymmetric insets keep the shadow
+	// on the pet-facing side from being clipped by the transparent window.
+	bubbleAboveShadow = 12
+	bubbleBelowShadow = 16
+	BubbleWidth       = bubbleCardWidth + 2*bubbleSideInset
+	BubbleHeight      = bubbleCardHeight + bubbleAboveShadow + bubbleBelowShadow
+	// bubbleGap is measured from the card edge, not the window edge, so the
+	// transparent shadow area never reads as extra space above the pet.
+	bubbleGap = 12
 )
 
-// BubbleSide says which side of the pet the bubble is on, and therefore
-// which edge the tail points from.
+// BubbleSide says which side of the pet the bubble is on.
 type BubbleSide uint8
 
 const (
@@ -28,12 +33,20 @@ const (
 	BubbleBelow
 )
 
-// BubblePlacement is the bubble rectangle plus the data its view needs to
-// draw a tail aimed at the pet.
+// BubbleTheme overrides the appearance the bubble inherits from the
+// application theme.
+type BubbleTheme uint8
+
+const (
+	BubbleThemeApp BubbleTheme = iota
+	BubbleThemeLight
+	BubbleThemeDark
+)
+
+// BubblePlacement is the bubble rectangle and the side it was placed on.
 type BubblePlacement struct {
 	Rect
-	Side  BubbleSide
-	TailX int
+	Side BubbleSide
 }
 
 // BubbleModel is the text shown by the separate, click-through bubble
@@ -41,82 +54,119 @@ type BubblePlacement struct {
 type BubbleModel struct {
 	text  string
 	side  BubbleSide
-	tailX int
+	theme BubbleTheme
 }
 
 // SetContent replaces the visible line and its placement. The next view
 // build draws both.
-func (b *BubbleModel) SetContent(text string, side BubbleSide, tailX int) {
+func (b *BubbleModel) SetContent(text string, side BubbleSide) {
 	b.text = text
 	b.side = side
-	b.tailX = tailX
 }
+
+// SetTheme overrides the application appearance used by the bubble.
+func (b *BubbleModel) SetTheme(theme BubbleTheme) { b.theme = theme }
 
 // Text returns the current line, for tests and diagnostics.
 func (b *BubbleModel) Text() string { return b.text }
 
-// View draws a rounded white speech bubble on a transparent root. The tail
-// is painted after the card so its fill covers the card border where they
-// meet.
+// View draws a warm, near-opaque speech card on a transparent root. There is
+// deliberately no tail: the card is already centered close to a single pet,
+// and a tail would add a second outline and shadow at every seam.
 func (b *BubbleModel) View(c *ui.Context) {
 	c.Root().Background(ui.Transparent)
 
-	top, bottom := float32(bubbleInset), float32(bubbleTailHeight)
+	top, bottom := float32(bubbleAboveShadow), float32(bubbleBelowShadow)
+	justify := ui.End
 	if b.side == BubbleBelow {
 		top, bottom = bottom, top
+		justify = ui.Start
 	}
-	outer := ui.Box(c).Fill().Padding(top, bubbleInset, bottom, bubbleInset).
-		Label("Lucia 气泡")
-	outer.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		drawBubbleTail(p, r, b.side, b.tailX, top, bottom)
-	})
+	// The card is intrinsically as tall as its wrapped lines. It stays
+	// anchored to the pet-facing edge of the window, so a one-line bubble
+	// does not inherit the empty height reserved for a three-line one.
+	outer := ui.Column(c).Fill().Padding(top, bubbleSideInset, bottom, bubbleSideInset).
+		Justify(justify).Label("Lucia 气泡")
 	outer.Children(func() {
-		card := ui.Box(c).Fill().Padding(12, 14, 12, 14).
-			Background(ui.RGBA(255, 255, 255, 0.97)).
-			Border(1, ui.RGBA(30, 41, 59, 0.14)).
-			Radius(bubbleCardRadius)
+		dark := c.Theme().Dark
+		switch b.theme {
+		case BubbleThemeLight:
+			dark = false
+		case BubbleThemeDark:
+			dark = true
+		}
+		palette := bubblePaletteFor(dark, c.Preferences().HighContrast)
+		card := ui.Box(c).FillWidth().
+			Padding(12, 14, 12, 14).
+			Background(palette.fill).
+			Border(1, palette.border).
+			Radius(bubbleCardRadius).
+			Shadow(0, 2, 4, 0, palette.shadowSoft).
+			Shadow(0, 5, 11, 0, palette.shadowDeep)
+		if palette.highlight.A != 0 {
+			card = card.InsetShadow(0, 1, 0, 0, palette.highlight)
+		}
 		card.Children(func() {
-			ui.Row(c).Fill().AlignItems(ui.Center).Children(func() {
-				ui.Text(c, b.text).Wrap().FontSize(14).TextColor(ui.RGBA(30, 41, 59, 1))
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Text(c, b.text).Wrap().Grow(1).
+					FontSize(14).FontWeight(500).
+					FixedLineHeight(20).
+					LetterSpacing(0.2).
+					TextColor(palette.text).
+					MaxLines(3).Ellipsis("…").
+					TextAlign(ui.Start)
 			})
 		})
 	})
 }
 
-func drawBubbleTail(p *ui.Painter, r ui.Rect, side BubbleSide, tailX int, top, bottom float32) {
-	x := float32(tailX)
-	if x <= 0 {
-		x = r.W / 2
-	}
-	minX := float32(bubbleInset + bubbleCardRadius + bubbleTailHalf)
-	maxX := r.W - minX
-	x = min(max(x, minX), maxX)
+// bubblePalette keeps the host-drawn bubble readable over arbitrary
+// wallpapers. It follows the effective application appearance rather than
+// sampling the wallpaper: a near-opaque warm paper in light mode and warm
+// charcoal in dark mode, both with their own border and shadow.
+type bubblePalette struct {
+	fill       ui.Color
+	text       ui.Color
+	border     ui.Color
+	shadowSoft ui.Color
+	shadowDeep ui.Color
+	highlight  ui.Color
+}
 
-	var baseY, tipY float32
-	if side == BubbleBelow {
-		baseY = top
-		tipY = top - bubbleTailHeight
-	} else {
-		baseY = r.H - bottom
-		tipY = baseY + bubbleTailHeight
+func bubblePaletteFor(dark, highContrast bool) bubblePalette {
+	if dark {
+		palette := bubblePalette{
+			fill:       ui.Hex("#2B2723").Alpha(0.97),
+			text:       ui.Hex("#EDE6DA"),
+			border:     ui.RGBA(255, 238, 214, 0.16),
+			shadowSoft: ui.RGBA(0, 0, 0, 0.22),
+			shadowDeep: ui.RGBA(0, 0, 0, 0.30),
+			highlight:  ui.RGBA(255, 255, 255, 0.06),
+		}
+		if highContrast {
+			palette.text = ui.Hex("#FFF8EE")
+			palette.border = ui.RGBA(255, 245, 230, 0.30)
+		}
+		return palette
 	}
-
-	fill := ui.RGBA(255, 255, 255, 0.97)
-	border := ui.RGBA(30, 41, 59, 0.14)
-	p.FillPath((&ui.Path{}).
-		MoveTo(x-bubbleTailHalf, baseY).
-		LineTo(x, tipY).
-		LineTo(x+bubbleTailHalf, baseY).
-		Close(), fill)
-	p.StrokePath((&ui.Path{}).
-		MoveTo(x-bubbleTailHalf, baseY).
-		LineTo(x, tipY).
-		LineTo(x+bubbleTailHalf, baseY), 1, border)
+	palette := bubblePalette{
+		fill:       ui.Hex("#FAF6EE").Alpha(0.97),
+		text:       ui.Hex("#3B342B"),
+		border:     ui.RGBA(90, 72, 48, 0.14),
+		shadowSoft: ui.RGBA(70, 52, 30, 0.10),
+		shadowDeep: ui.RGBA(70, 52, 30, 0.12),
+	}
+	if highContrast {
+		palette.text = ui.Hex("#2A231C")
+		palette.border = ui.RGBA(60, 45, 30, 0.30)
+	}
+	return palette
 }
 
 // PlaceBubble centers a bubble above the pet, flips it below when the top of
 // the work area is in the way, and keeps its horizontal position on-screen.
-// The tail follows the pet even when the bubble is clamped to a screen edge.
+// The gap is measured from the card edge so the transparent shadow inset does
+// not change the visual distance from the pet.
 func PlaceBubble(petRect Rect, displays []Display) BubblePlacement {
 	bubble := BubblePlacement{
 		Rect: Rect{Width: BubbleWidth, Height: BubbleHeight},
@@ -124,8 +174,7 @@ func PlaceBubble(petRect Rect, displays []Display) BubblePlacement {
 	}
 	if len(displays) == 0 {
 		bubble.X = petRect.X + (petRect.Width-BubbleWidth)/2
-		bubble.Y = petRect.Y - BubbleHeight - bubbleGap
-		bubble.TailX = bubbleTailX(petRect, bubble.Rect)
+		bubble.Y = petRect.Y - bubbleGap - bubbleCardHeight - bubbleAboveShadow
 		return bubble
 	}
 
@@ -134,21 +183,13 @@ func PlaceBubble(petRect Rect, displays []Display) BubblePlacement {
 		petRect.X+(petRect.Width-BubbleWidth)/2,
 		area.X, BubbleWidth, area.Width,
 	)
-	bubble.Y = petRect.Y - BubbleHeight - bubbleGap
+	bubble.Y = petRect.Y - bubbleGap - bubbleCardHeight - bubbleAboveShadow
 	if bubble.Y < area.Y {
-		bubble.Y = petRect.Y + petRect.Height + bubbleGap
+		bubble.Y = petRect.Y + petRect.Height + bubbleGap - bubbleBelowShadow
 		bubble.Side = BubbleBelow
 	}
 	bubble.Y = clampAxis(bubble.Y, area.Y, BubbleHeight, area.Height)
-	bubble.TailX = bubbleTailX(petRect, bubble.Rect)
 	return bubble
-}
-
-func bubbleTailX(petRect, bubble Rect) int {
-	tail := petRect.X + petRect.Width/2 - bubble.X
-	minTail := bubbleInset + bubbleCardRadius + bubbleTailHalf
-	maxTail := BubbleWidth - minTail
-	return min(max(tail, minTail), maxTail)
 }
 
 func matchingDisplay(win Rect, displays []Display) Display {

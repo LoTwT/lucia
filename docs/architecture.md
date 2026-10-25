@@ -51,7 +51,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 
 开发运行由 MyGo 命名为 `Lucia Dev`，因此数据、日志、窗口状态与正式版天然隔离。Windows 使用 `%LOCALAPPDATA%` 而不是漫游 `%APPDATA%`：更新状态与本地数据不应被漫游配置文件或组织策略跨机器同步。
 
-设置文件为数据目录下的 `settings.json`，采用临时文件加改名写入，崩溃不会留下半个 JSON。加载时先取 `Default()` 再反序列化，旧文件缺少新字段时保留默认值。当前持久化 `checkUpdatesOnLaunch`、`petVisible`、`petScale`、`soundEnabled`、`bubbleCooldownSeconds`、`petPack` 与 `petIntroPlayed`；开机自启由 MyGo 的登录项接口管理，不重复落盘。进程内所有写入都经过 `settings.Store.Update`；控制台只合并展示类字段，桌宠运行时拥有的 `petPack`/`petIntroPlayed` 不会被旧副本覆盖。窗口位置由 MyGo 按 `StateKey` 存在同一数据根：控制台为 `"main"`，桌宠为 `"pet"`，气泡不设 `StateKey`。外部素材包位于 `<数据目录>/packs/<id>/`，由控制台或 `cmd/petpack` 导入；它不属于窗口状态，也不进入仓库或安装包。
+设置文件为数据目录下的 `settings.json`，采用临时文件加改名写入，崩溃不会留下半个 JSON。加载时先取 `Default()` 再反序列化，旧文件缺少新字段时保留默认值。当前持久化 `checkUpdatesOnLaunch`、`theme`、`petVisible`、`petScale`、`soundEnabled`、`bubbleCooldownSeconds`、`bubbleTheme`、`petPack` 与 `petIntroPlayed`；开机自启由 MyGo 的登录项接口管理，不重复落盘。进程内所有写入都经过 `settings.Store.Update`；控制台只合并展示类字段，桌宠运行时拥有的 `petPack`/`petIntroPlayed` 不会被旧副本覆盖。窗口位置由 MyGo 按 `StateKey` 存在同一数据根：控制台为 `"main"`，桌宠为 `"pet"`，气泡不设 `StateKey`。外部素材包位于 `<数据目录>/packs/<id>/`，由控制台或 `cmd/petpack` 导入；它不属于窗口状态，也不进入仓库或安装包。
 
 ## 3.1 素材包
 
