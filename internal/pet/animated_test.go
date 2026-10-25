@@ -170,6 +170,26 @@ func TestAnimatedPokeChainsToIdle(t *testing.T) {
 	}
 }
 
+func TestFiniteDrowsyReturnsToIdle(t *testing.T) {
+	m, _ := newTinyAnimatedModel(t)
+	width, height := m.WindowSize()
+	tt := ui.NewTester(m.View, width, height)
+	tt.Frame()
+	tt.Advance(drowsyAfter)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "sleep_denial" {
+		t.Fatalf("current = %+v, want the finite drowsy action", m.animated.current)
+	}
+	tt.Advance(500 * time.Millisecond)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "idle" {
+		t.Fatalf("current = %+v, want idle after the finite drowsy action", m.animated.current)
+	}
+	if m.animated.restPoster != nil {
+		t.Fatal("finite drowsy action left a static poster")
+	}
+}
+
 func TestAnimatedDragChain(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	width, height := m.WindowSize()
@@ -271,7 +291,7 @@ func TestAnimatedSpecialWakesFromSleep(t *testing.T) {
 }
 
 func TestAnimatedQueuesActionBehindIntro(t *testing.T) {
-	a := &animatedModel{}
+	a := &animatedModel{pack: newTinyPack(t)}
 	a.requestAction("wave")
 	a.requestAction("think")
 	a.requestAction("think")

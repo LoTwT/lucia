@@ -147,12 +147,12 @@ func (m *Model) packRow(c *ui.Context, pack PackSummary) {
 					ui.Text(c, pack.Error).FontSize(11).TextColor(t.Danger).Selectable()
 				}
 			})
-			if ui.Button(c, "预览").Clicked() {
+			if ui.Button(c, "预览").Disabled(m.packBusy).Clicked() {
 				m.packSelected = pack.ID
 				m.loadPackPreview()
 			}
 			if pack.Valid && !pack.Active && m.cfg.ActivatePack != nil {
-				if ui.PrimaryButton(c, "启用").Clicked() {
+				if ui.PrimaryButton(c, "启用").Disabled(m.packBusy).Clicked() {
 					m.activatePack(pack.ID)
 				}
 			}
@@ -192,7 +192,7 @@ func (m *Model) packImportPanel(c *ui.Context) {
 				FontSize(11).TextColor(t.TextMuted)
 		})
 		if m.packBusy {
-			ui.Text(c, "正在等待系统对话框…").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "正在处理素材包…").FontSize(12).TextColor(t.TextMuted)
 		}
 		if m.packNotice != "" {
 			ui.Text(c, m.packNotice).FontSize(12).TextColor(t.Success).Selectable()

@@ -11,7 +11,7 @@ import (
 	"github.com/LoTwT/lucia/internal/petpack"
 )
 
-//go:embed whale
+//go:embed whale/pack.json whale/clips whale/LICENSE whale/NOTICE.md
 var content embed.FS
 
 // FS returns the embedded whale pack rooted at its manifest directory.

@@ -160,7 +160,8 @@ type animatedModel struct {
 	reduceMotion bool
 	lastView     time.Time
 
-	posters map[string]image.Image
+	posters        map[string]image.Image
+	reducedPosters map[string]image.Image
 }
 
 func newAnimatedModel(pack *petpack.Pack) (*animatedModel, error) {
@@ -180,10 +181,11 @@ func newAnimatedModel(pack *petpack.Pack) (*animatedModel, error) {
 		return nil, err
 	}
 	a := &animatedModel{
-		pack:       pack,
-		idleAction: idleAction,
-		poster:     poster,
-		posters:    map[string]image.Image{"idle": poster},
+		pack:           pack,
+		idleAction:     idleAction,
+		poster:         poster,
+		posters:        map[string]image.Image{pack.Manifest.States.Idle: poster},
+		reducedPosters: make(map[string]image.Image),
 	}
 	go a.cacheIdle(idleClip)
 	return a, nil
@@ -397,10 +399,14 @@ func (a *animatedModel) requestAction(id string) {
 		return
 	}
 	a.clearSequence()
-	// The first-launch wave can be requested before the first View syncs.
+	// The first-launch intro can be requested before the first View syncs.
 	// Background update notifications must queue behind it instead of
 	// replacing the only chance to play the intro.
-	if a.pendingOnce == "wave" && id != "wave" {
+	intro := ""
+	if a.pack != nil {
+		intro = a.pack.Manifest.Events.Intro
+	}
+	if intro != "" && a.pendingOnce == intro && id != intro {
 		for _, queued := range a.queuedOnce {
 			if queued == id {
 				return
@@ -568,15 +574,23 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 				return
 			}
 		}
-		if drowsyID != "" && (a.current == nil || a.current.actionID == idleID) &&
-			a.holdStatePoster(drowsyID) {
-			return
+		// A drowsy action with clips plays once and returns to idle. Only a
+		// poster-only action holds a static pose for the whole drowsy period.
+		if drowsyID != "" && (a.current == nil || a.current.actionID == idleID) {
+			if action, ok := a.pack.Action(drowsyID); ok && !actionHasClip(action) &&
+				a.holdStatePoster(drowsyID) {
+				return
+			}
 		}
 	}
 	if a.current == nil {
 		a.startIdle(now)
 	}
 	a.advance(now)
+}
+
+func actionHasClip(action petpack.Action) bool {
+	return action.Once != "" || action.Enter != "" || action.Loop != "" || action.Exit != ""
 }
 
 // holdStatePoster displays an action's poster without playing a clip. Drowsy
@@ -888,7 +902,7 @@ func (a *animatedModel) reducedImage(activity Activity, dragging bool, interacti
 	}
 	if interactionID != "" && !interactionAt.IsZero() && now.Sub(interactionAt) < animatedReduceMotionFeedback {
 		if interaction, ok := a.pack.Interaction(interactionID); ok && interaction.ReducedPoster != "" {
-			if poster, err := a.pack.PosterFrame(interaction.ReducedPoster); err == nil {
+			if poster := a.reducedPoster(interaction.ReducedPoster); poster != nil {
 				return poster
 			}
 		}
@@ -925,6 +939,19 @@ func (a *animatedModel) posterFor(actionID string) image.Image {
 	}
 	a.posters[actionID] = poster
 	return poster
+}
+
+func (a *animatedModel) reducedPoster(poster string) image.Image {
+	if cached, ok := a.reducedPosters[poster]; ok {
+		return cached
+	}
+	img, err := a.pack.PosterFrame(poster)
+	if err != nil {
+		log.Printf("lucia: pet pack reduced poster %q: %v", poster, err)
+		return nil
+	}
+	a.reducedPosters[poster] = img
+	return img
 }
 
 func (a *animatedModel) canPlayActions() bool {

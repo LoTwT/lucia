@@ -62,7 +62,7 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		return nil, fmt.Errorf("petpack import: open zip: %w", err)
 	}
 	defer reader.Close()
-	baseManifest, hasManifest, err := readZipManifest(reader.File)
+	baseManifest, _, err := readZipManifest(reader.File)
 	if err != nil {
 		return nil, fmt.Errorf("petpack import: read manifest: %w", err)
 	}
@@ -192,7 +192,8 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		return nil, fmt.Errorf("petpack import: base window and sprite sizes are required")
 	}
 	actions := baseManifest.Actions
-	if len(actions) == 0 {
+	generatedActions := len(actions) == 0
+	if generatedActions {
 		actions = buildActions(imported)
 	}
 	states := baseManifest.States
@@ -201,7 +202,7 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	}
 	events := baseManifest.Events
 	menu := baseManifest.Menu
-	if !hasManifest {
+	if generatedActions {
 		events = buildEvents(actions)
 		menu = buildMenu(actions)
 	}

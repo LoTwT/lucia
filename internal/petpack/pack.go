@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -228,6 +229,9 @@ func ReadManifestFS(fsys fs.FS, id string) (Manifest, error) {
 	if !validPackDirID(id) {
 		return Manifest{}, fmt.Errorf("petpack: invalid pack id %q", id)
 	}
+	if IsReservedPackID(id) {
+		return Manifest{}, fmt.Errorf("petpack: pack id %q is reserved", id)
+	}
 	manifest, err := readManifestFS(fsys, id)
 	if err != nil {
 		return Manifest{}, err
@@ -324,7 +328,8 @@ func loadPackFS(fsys fs.FS, id string, displayScale float64, dir string) (*Pack,
 		clip.data = nil // loaded again by each Decoder from clip.path
 		pack.Clips[clipID] = clip
 	}
-	for actionID, action := range manifest.Actions {
+	for _, actionID := range sortedKeys(manifest.Actions) {
+		action := manifest.Actions[actionID]
 		for _, clipID := range actionClips(action) {
 			if clipID != "" {
 				if _, ok := pack.Clips[clipID]; !ok {
@@ -333,8 +338,8 @@ func loadPackFS(fsys fs.FS, id string, displayScale float64, dir string) (*Pack,
 			}
 		}
 		if action.Poster != "" {
-			if _, _, err := splitPoster(action.Poster); err != nil {
-				return nil, fmt.Errorf("petpack %q action %q: %w", id, actionID, err)
+			if err := validatePosterRef(manifest, action.Poster); err != nil {
+				return nil, fmt.Errorf("petpack %q action %q poster: %w", id, actionID, err)
 			}
 		}
 	}
@@ -386,20 +391,38 @@ func validateManifest(id string, manifest Manifest) error {
 	if len(manifest.Clips) == 0 {
 		return fmt.Errorf("petpack %q: no clips", id)
 	}
-	for actionID, action := range manifest.Actions {
+	for _, actionID := range sortedKeys(manifest.Actions) {
+		action := manifest.Actions[actionID]
 		if !validPackID(actionID) {
 			return fmt.Errorf("petpack %q: invalid action id %q", id, actionID)
 		}
 		if action.LoopCount < -1 {
 			return fmt.Errorf("petpack %q action %q: loopCount %d", id, actionID, action.LoopCount)
 		}
-		for name, hold := range map[string]int{
-			"enterHoldMs": action.Timing.EnterHoldMs,
-			"loopHoldMs":  action.Timing.LoopHoldMs,
-			"exitHoldMs":  action.Timing.ExitHoldMs,
+		for _, hold := range []struct {
+			name  string
+			value int
+		}{
+			{"enterHoldMs", action.Timing.EnterHoldMs},
+			{"loopHoldMs", action.Timing.LoopHoldMs},
+			{"exitHoldMs", action.Timing.ExitHoldMs},
 		} {
-			if hold < 0 || hold > 60000 {
-				return fmt.Errorf("petpack %q action %q: %s %d outside 0..60000", id, actionID, name, hold)
+			if hold.value < 0 || hold.value > 60000 {
+				return fmt.Errorf("petpack %q action %q: %s %d outside 0..60000",
+					id, actionID, hold.name, hold.value)
+			}
+		}
+		for _, clipID := range actionClips(action) {
+			if clipID == "" {
+				continue
+			}
+			if _, ok := manifest.Clips[clipID]; !ok {
+				return fmt.Errorf("petpack %q action %q references missing clip %q", id, actionID, clipID)
+			}
+		}
+		if action.Poster != "" {
+			if err := validatePosterRef(manifest, action.Poster); err != nil {
+				return fmt.Errorf("petpack %q action %q poster: %w", id, actionID, err)
 			}
 		}
 	}
@@ -417,29 +440,45 @@ func validateManifest(id string, manifest Manifest) error {
 		return fmt.Errorf("petpack %q: states.idle action %q must be interruptible when hotzones exist",
 			id, manifest.States.Idle)
 	}
-	for name, actionID := range map[string]string{
-		"drag":   manifest.States.Drag,
-		"drowsy": manifest.States.Drowsy,
-		"asleep": manifest.States.Asleep,
+	for _, state := range []struct {
+		name     string
+		actionID string
+	}{
+		{"drag", manifest.States.Drag},
+		{"drowsy", manifest.States.Drowsy},
+		{"asleep", manifest.States.Asleep},
 	} {
-		if actionID == "" {
+		if state.actionID == "" {
 			continue
 		}
-		action, ok := manifest.Actions[actionID]
+		action, ok := manifest.Actions[state.actionID]
 		if !ok {
-			return fmt.Errorf("petpack %q: states.%s references missing action %q", id, name, actionID)
+			return fmt.Errorf("petpack %q: states.%s references missing action %q", id, state.name, state.actionID)
 		}
-		if name == "asleep" && action.LoopCount >= 0 && action.Poster == "" {
-			return fmt.Errorf("petpack %q: states.asleep action %q must loop or declare a poster", id, actionID)
+		switch state.name {
+		case "drag":
+			if action.Enter == "" || action.Loop == "" || action.Exit == "" || action.LoopCount != -1 {
+				return fmt.Errorf("petpack %q: states.drag action %q must declare enter, loop and exit with loopCount -1",
+					id, state.actionID)
+			}
+		case "asleep":
+			if action.LoopCount >= 0 && action.Poster == "" {
+				return fmt.Errorf("petpack %q: states.asleep action %q must loop or declare a poster",
+					id, state.actionID)
+			}
 		}
 	}
-	for name, actionID := range map[string]string{
-		"intro":           manifest.Events.Intro,
-		"activate":        manifest.Events.Activate,
-		"reset":           manifest.Events.Reset,
-		"update.checking": manifest.Events.UpdateChecking,
-		"update.failed":   manifest.Events.UpdateFailed,
+	for _, event := range []struct {
+		name     string
+		actionID string
+	}{
+		{"intro", manifest.Events.Intro},
+		{"activate", manifest.Events.Activate},
+		{"reset", manifest.Events.Reset},
+		{"update.checking", manifest.Events.UpdateChecking},
+		{"update.failed", manifest.Events.UpdateFailed},
 	} {
+		name, actionID := event.name, event.actionID
 		if actionID == "" {
 			continue
 		}
@@ -459,7 +498,8 @@ func validateManifest(id string, manifest Manifest) error {
 	if len(manifest.Interactions) > 64 {
 		return fmt.Errorf("petpack %q: more than 64 interactions", id)
 	}
-	for interactionID, interaction := range manifest.Interactions {
+	for _, interactionID := range sortedKeys(manifest.Interactions) {
+		interaction := manifest.Interactions[interactionID]
 		if !validPackID(interactionID) {
 			return fmt.Errorf("petpack %q: invalid interaction id %q", id, interactionID)
 		}
@@ -509,7 +549,8 @@ func validateManifest(id string, manifest Manifest) error {
 				id, interactionID)
 		}
 	}
-	for bubbleID, lines := range manifest.Bubbles {
+	for _, bubbleID := range sortedKeys(manifest.Bubbles) {
+		lines := manifest.Bubbles[bubbleID]
 		if !validPackID(bubbleID) {
 			return fmt.Errorf("petpack %q: invalid bubble id %q", id, bubbleID)
 		}
@@ -571,6 +612,15 @@ func validateManifest(id string, manifest Manifest) error {
 		}
 	}
 	return nil
+}
+
+func sortedKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (r NormalizedRect) Valid() bool {

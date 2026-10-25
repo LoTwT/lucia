@@ -27,6 +27,12 @@ func TestManifestValidation(t *testing.T) {
 			m.States.Asleep = "happy"
 			m.Actions["happy"] = Action{Once: "idle_loop", LoopCount: 0}
 		}, "must loop or declare a poster"},
+		{"drag structure", func(m *Manifest) { m.States.Drag = "happy" }, "must declare enter, loop and exit"},
+		{"action poster", func(m *Manifest) {
+			action := m.Actions["happy"]
+			action.Poster = "missing#0"
+			m.Actions["happy"] = action
+		}, "missing clip"},
 		{"event action", func(m *Manifest) { m.Events.Intro = "missing" }, "missing action"},
 		{"idle motion", func(m *Manifest) { m.IdleMotion = "sway" }, "invalid idleMotion"},
 		{"hotzone interaction", func(m *Manifest) { m.Hotzones[0].Interaction = "missing" }, "missing interaction"},
@@ -160,6 +166,14 @@ func TestDocumentedExampleIsValid(t *testing.T) {
 	}
 	if err := validateManifest("example", manifest); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReadManifestRejectsReservedID(t *testing.T) {
+	dir := writeTinyPack(t)
+	if _, err := ReadManifest(filepath.Join(dir, "packs", "tiny"), BuiltinPackID); err == nil ||
+		!strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("ReadManifest error = %v, want reserved id error", err)
 	}
 }
 

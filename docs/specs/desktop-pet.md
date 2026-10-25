@@ -121,13 +121,13 @@
 }
 ```
 
-- 只有 `schema: 1`。缺失、其他值或未知字段都在严格解码阶段失败；没有版本分支、旧格式识别或迁移路径。
+- 只有 `schema: 1`。缺失、其他值或未知字段都在严格解码阶段失败；代码中只有一个解析路径。
 - `canvas`、`crop`、`base.window`、`base.sprite`、`bubbleAnchor` 定义几何；`crop` 是画布内的裁剪矩形，导入时计算不透明区域并外扩 2 px。
 - `clips` 保存文件名、帧数、循环标志和 SHA-256；`actions` 把状态和事件映射到 `enter/loop/exit/once` clip。`loopCount = -1` 表示持续循环，`0` 跳过 loop，`> 0` 播放指定遍数。
 - `states` 必填 `idle`，可声明 `drag`、`drowsy`、`asleep`。`asleep` 必须循环或提供 poster；未声明时显示 idle 海报。
 - `events`、`hotzones`、`interactions`、`bubbles`、`menu` 都可为空。没有热区时桌宠仍播放 idle，但立绘不可点击。
 - `idleMotion` 取 `none` 或 `bob`；`interaction.motion` 取 `none`、`squash`、`lift`。
-- 校验拒绝：空 rect 或超出 0–1、重复热区 id、未知 interaction/action/bubble、循环动作作为 steps 或菜单动作、负数或超过 60 秒的 delay/hold、motion-only 交互缺少 `reducedPoster`、空气泡行、超过 200 字的气泡、Windows 保留目录名，以及保留 id `lucia-whale`。
+- 校验拒绝：空 rect 或超出 0–1、重复热区 id、未知 interaction/action/bubble、循环动作作为 steps 或菜单动作、负数或超过 60 秒的 delay/hold、motion-only 交互缺少 `reducedPoster`、空气泡行、超过 200 字的气泡、未知 clip/帧引用、Windows 保留目录名。`ImportZip`、`Store` 和面向用户包的 `ReadManifest` 还拒绝保留 id `lucia-whale`；内嵌包通过 `LoadFS` 读取。
 - 示例 manifest 见 [docs/examples/pet-pack.json](../examples/pet-pack.json)；示例中的 `frames` 是结构示意，实际值必须与 WebP 文件一致。
 - 画布与窗口边长上限为 4096 px，单个 clip 帧数上限为 1000；解码器在分配画布前再次校验。
 
@@ -156,7 +156,7 @@
 - 其他 clip 不预加载，播放时按顺序解码；解码发生在 UI 线程。
 - 状态机按“拖动 > 用户交互 > 事件/菜单动作 > 困倦 > idle”排序。`enter` 播完进入 `loop`；`loopCount = 0` 直接进入 `exit`，`-1` 持续循环，`> 0` 播完指定遍数后进入 `exit`。步骤在当前动作自然结束后按 delay 链式启动。
 - `idleMotion: bob` 时，`nextDelay` 取当前帧剩余时长与状态帧间隔的较小值：清醒 33 ms、困倦 66 ms、睡着 100 ms；交互 motion 期间 16 ms。没有 `bob` 时回到按帧时长调度。
-- 困倦状态：动作可循环或播放一次；有限动作结束后显示其 poster。睡着状态：循环动作持续播放，或显示 poster；未声明时显示 idle 海报。
+- 困倦状态：动作可循环或播放一次。带 clip 的有限动作播完回到 idle；只有无 clip 的 poster-only 动作才在困倦期间保持静态姿势。睡着状态：循环动作持续播放，或显示 poster；未声明时显示 idle 海报。
 - 系统事件接法：更新检查/下载阶段映射 `update.checking`，更新失败映射 `update.failed`；首次启动映射 `intro`，换包映射 `activate`，重置位置映射 `reset`。
 - Reduce Motion 不播连续动画：idle 显示静态海报，交互显示 `reducedPoster` 1.2 秒，拖动显示 drag 状态海报，动作菜单入口隐藏；状态切换时才预约下一帧。
 - 动画时钟仍由 `ui.Context.Now()` 推导；idle 缓存的后台解码是唯一新增的后台工作，它不驱动 UI，完成后由下一次调度帧读取。

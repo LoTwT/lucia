@@ -109,6 +109,18 @@ func TestImportMetaOnlyKeepsInteractionsAndBuildsActions(t *testing.T) {
 	if pack.Manifest.Schema != 1 {
 		t.Fatalf("schema = %d, want 1", pack.Manifest.Schema)
 	}
+	if pack.Manifest.Events.Intro != "wave" || pack.Manifest.Events.Activate != "wave" {
+		t.Fatalf("generated events = %+v", pack.Manifest.Events)
+	}
+	foundSpecial := false
+	for _, entry := range pack.Manifest.Menu {
+		if entry.Action == "belly_taunt" {
+			foundSpecial = true
+		}
+	}
+	if !foundSpecial {
+		t.Fatalf("generated menu = %+v, want belly_taunt", pack.Manifest.Menu)
+	}
 }
 
 func TestStoreReplaceFailureRestoresHealthyPack(t *testing.T) {
@@ -406,7 +418,10 @@ func writeMetaOnlyZip(t *testing.T, dir string) string {
 	}
 	var buf bytes.Buffer
 	writer := zip.NewWriter(&buf)
-	for _, id := range []string{"idle_loop", "happy_enter", "happy_exit", "laugh_enter", "laugh_exit"} {
+	for _, id := range []string{
+		"idle_loop", "happy_enter", "happy_exit", "laugh_enter", "laugh_exit",
+		"wave_enter", "belly_taunt",
+	} {
 		entry, err := writer.Create(id + ".webp")
 		if err != nil {
 			t.Fatal(err)

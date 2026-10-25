@@ -6,9 +6,18 @@ import (
 	"image/draw"
 	"image/png"
 	"io/fs"
+	"os"
 	"testing"
 	"time"
 )
+
+func TestSourceAssetsAreNotEmbedded(t *testing.T) {
+	for _, name := range []string{"whale/source", "whale/generate.sh"} {
+		if _, err := fs.Stat(content, name); err == nil {
+			t.Errorf("%s is embedded; source assets must stay out of the binary", name)
+		}
+	}
+}
 
 func TestWhalePackAssetsMatchSources(t *testing.T) {
 	pack, err := Load(1)
@@ -74,7 +83,7 @@ func TestWhalePackAssetsMatchSources(t *testing.T) {
 
 func readPNG(t *testing.T, name string) *image.RGBA {
 	t.Helper()
-	data, err := fs.ReadFile(content, name)
+	data, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}
