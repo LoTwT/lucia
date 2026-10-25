@@ -220,7 +220,7 @@ func (m *Model) TriggerHotzone(id string) {
 	if !found {
 		return
 	}
-	m.triggerPreset(zone.Preset, zone.Action, ReactionFace)
+	m.triggerPreset(zone.Preset, zone.Action, ReactionNone)
 }
 
 // TriggerPreset is the menu-facing entry for a named interaction preset.
@@ -246,7 +246,12 @@ func (m *Model) triggerPreset(presetID, action string, fallback Reaction) {
 	m.interacted = true
 	if m.animated != nil {
 		if !m.animated.requestPreset(presetID, action) {
-			m.animated.requestReaction(fallback)
+			if fallback == ReactionNone {
+				fallback = reaction
+			}
+			if fallback != ReactionNone {
+				m.animated.requestReaction(fallback)
+			}
 		}
 	}
 	if bubbleReaction != ReactionNone && m.onReaction != nil {
@@ -305,6 +310,14 @@ func fallbackReaction(id string) Reaction {
 // Animated reports whether the model is backed by an imported animation
 // pack rather than the built-in static artwork.
 func (m *Model) Animated() bool { return m.animated != nil }
+
+// Close releases the current clip decoder. Cached idle frames stay in memory
+// until the model becomes unreachable; there are no persistent file handles.
+func (m *Model) Close() {
+	if m != nil && m.animated != nil {
+		m.animated.close()
+	}
+}
 
 // PlayAction starts a one-shot action from an imported animated pack. It is
 // a no-op for the built-in static artwork.

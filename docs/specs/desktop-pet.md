@@ -104,11 +104,12 @@
 - `crop` 是素材画布内的不透明区域并集（导入时计算，外扩 2 px），用于减少透明边距；播放时先合成完整画布再裁剪。
 - 画布与窗口边长上限为 4096 px，单个 clip 帧数上限为 1000；解码器在分配画布前再次校验，畸形素材只会得到错误而不会 panic。
 - `base.window` / `base.sprite` 单位为 DIP；`face` 与 `bubbleAnchor` 归一化到裁剪后的实际立绘。
-- 控制台与 `cmd/petpack` 共用导入器。zip 根部的 `pack.json` 或 `pack.meta.json` 提供 id、名称、几何、动作、热区和预设；缺失时从 zip 文件名推导 id 并使用默认几何。导入器读取 zip 时优先解析每个条目的 `0x7075` Unicode Path 扩展字段（校验其中记录的 CRC32）；缺失时按 GBK 解码中文名。clip ID 只依赖文件名开头的 ASCII 部分，避免编码差异影响识别；`__MACOSX/` 与 `._*` 资源叉条目会被跳过。
+- 控制台与 `cmd/petpack` 共用导入器。zip 中任意层级最浅的 `pack.json` 或 `pack.meta.json` 提供 id、名称、几何、动作、热区和预设；缺失时从 zip 文件名推导 id 并使用默认几何。导入器读取 zip 时优先解析每个条目的 `0x7075` Unicode Path 扩展字段（校验其中记录的 CRC32）；缺失时按 GBK 解码中文名。clip ID 只依赖文件名开头的 ASCII 部分，避免编码差异影响识别；`__MACOSX/` 与 `._*` 资源叉条目会被跳过。
 - 导入只接受 `.webp`，丢弃 MP4 预览；限制 manifest 4 MiB、单文件 64 MiB、解压总量 512 MiB，防止 zip-slip 与 zip 炸弹；先写临时目录，旧包备份后安装新包并校验，失败时回滚。控制台拒绝静默覆盖同名包；`cmd/petpack -force` 明确要求覆盖。
 - 素材包 manifest 写入 `license.status = "local-only"`；naiwa 素材不进入仓库、CI、安装包或发布资产。控制台导入前必须勾选本地使用授权。
-- 控制台流程：素材包页 → 选择 zip → 勾选授权 →（可选）勾选替换同名包 → “导入并启用”。导入成功后桌宠立即切换；失败时保留原模型与原设置。列表可启用、删除未使用的包、切回内置鲸鱼，并预览静态海报与热区。正在使用的包不能删除。
-- 开发命令（默认写入开发版数据目录）：
+- 控制台流程：素材包页 → 选择 zip → 勾选授权 →（可选）勾选替换同名包 → “导入并启用”。导入成功后桌宠立即切换；失败时保留原模型与原设置。列表可启用、删除未使用的包、切回内置鲸鱼，并预览静态海报、热区、预设步骤和动作时序。正在使用的包不能删除。导入、替换和预览在 UI 线程同步执行，大包会短暂阻塞控制台；运行中的应用与开发工具不能同时导入。
+- 启动时素材包加载失败会回退内置鲸鱼，并清除 `petPack`/active 选择，避免控制台继续显示“使用中”。失效包仍会显示在列表中，可直接删除或替换。
+- 开发命令（默认写入开发版数据目录；运行中的应用与控制台导入不能并发）：
   ```sh
   go run ./cmd/petpack -zip naiwa.zip
   go run ./cmd/petpack -zip naiwa.zip -app Lucia   # 显式指定打包版
@@ -119,10 +120,10 @@
 ### schema 2 热区、预设与时序
 
 - `face` 保留为 schema 1 的脸部热区来源；schema 2 定义 `hotzones` 时可以省略 `face`，但若填写就必须是合法的归一化矩形。
-- `hotzones` 是 id 到点击区域的映射：`rect` 归一化到 `crop`，`label` 用于无障碍与预览，`preset` 引用一个预设，`action` 是该预设没有 steps 时的回退动作。未定义 `hotzones` 时，schema 1 的 `face` 自动成为 `face` 热区，使用 `tap` 预设。
-- `presets` 是可复用交互序列：`reaction` 与 `bubble` 取 `face`、`pat`、`none`；`steps` 每项 `{action, delayMs}`，`delayMs` 在上一步结束后、下一步开始前等待 0–60000 ms。预设有 steps 时优先执行 steps；没有 steps 时使用热区的 `action`。`tap`/`pat` 是保留的内置预设名。
+- `hotzones` 是 id 到点击区域的映射：`rect` 归一化到 `crop`，`label` 用于无障碍与预览，`preset` 引用一个预设，`action` 是该预设没有 steps 时的回退动作。回退动作必须是有限动作（`loopCount >= 0` 且至少有一个 clip）；`drag`/`idle` 这类循环动作会被拒绝。未定义 `hotzones` 时，schema 1 的 `face` 自动成为 `face` 热区，使用 `tap` 预设。重叠热区按 id 排序，后绘制者覆盖先绘制者。
+- `presets` 是可复用交互序列：`reaction` 与 `bubble` 取 `face`、`pat`、`none`；`steps` 每项 `{action, delayMs}`。第一步的 `delayMs` 从点击时开始等待，后续步骤的 `delayMs` 在上一步结束后等待；上限 60000 ms。等待期间继续播放 idle，不冻结在海报帧。预设有 steps 时优先执行 steps；没有 steps 时使用热区的 `action`，再退到预设 reaction。`tap`/`pat` 是保留的内置预设名。
 - 动作级 `timing.enterHoldMs`、`loopHoldMs`、`exitHoldMs` 在对应阶段最后一帧后额外停留 0–60000 ms，不修改 WebP 的帧时长。`loopCount` 仍决定循环遍数，`-1` 表示持续循环。
-- 校验拒绝：未知 preset/action、空 rect 或超出 0–1 的 rect、非法 reaction/bubble、负数或超过 60 秒的 delay/hold、循环预设步骤（`loopCount < 0` 的动作不能作为有限步骤）。schema 1 与 schema 2 都通过同一解析与校验路径，播放器只消费 schema 2 内存结构。
+- 校验拒绝：未知 preset/action、空 rect 或超出 0–1 的 rect、非法 reaction/bubble、负数或超过 60 秒的 delay/hold、循环动作（`loopCount < 0` 的动作不能作为预设步骤或热区回退），以及 Windows 保留目录名（`con`、`aux`、`nul`、`com1`–`com9`、`lpt1`–`lpt9`）。schema 1 与 schema 2 都通过同一解析与校验路径，播放器只消费 schema 2 内存结构；`-strict` 例外地读取磁盘原始 JSON，避免 normalize 后误判。
 - 示例 manifest 见 [docs/examples/pet-pack.schema2.json](../examples/pet-pack.schema2.json)；示例中的 `frames` 是结构示意，实际值必须与 WebP 文件一致。
 
 ### 解码与播放
@@ -159,7 +160,7 @@ go test ./...
 go tool mygo vet .
 ```
 
-`internal/petpack` 覆盖：tiny 动画 WebP 的 ANMF 解析、部分帧、blend/dispose、VP8L 与 lossy ALPH、裁剪缩放、schema 1 升级、schema 2 热区/预设/时序校验、manifest 海报、zip 导入与 manifest 合并、Store 导入/激活/删除、lockfile、pending/backup 恢复、预览 PNG、0x7075/GBK 文件名、clip ID 归一化。`internal/pet` 覆盖：内置三帧布局、非方形布局、脸部热区、气泡锚点、静态 View，以及动画 idle 循环、点脸→laugh→idle、拖动链、特殊动作菜单、热区点击→preset、步骤延迟、动作停留时序、Reduce Motion 海报。`internal/settings` 覆盖 Store 并发/失败/字段保留；`internal/ui` 覆盖素材包列表、无效包说明、导入授权、导入后启用与删除。
+`internal/petpack` 覆盖：tiny 动画 WebP 的 ANMF 解析、部分帧、blend/dispose、VP8L 与 lossy ALPH、裁剪缩放、schema 1 升级、原始/规范化 manifest 区分、schema 2 热区/预设/时序校验、循环动作拒绝、Windows 保留名、manifest 海报、zip 导入与 manifest 合并、meta-only 默认步骤、Store 导入/替换/激活/删除、替换失败回滚、lockfile/pending/backup 恢复、损坏元数据隔离、预览 PNG、0x7075/GBK 文件名、clip ID 归一化。`internal/pet` 覆盖：内置三帧布局、非方形布局、脸部热区、气泡锚点、静态 View，以及动画 idle 循环、点脸→laugh→idle、拖动链、特殊动作菜单、热区点击→preset、首步 delay/等待时 idle、预设 reaction fallback、动作停留时序、解码失败自愈、Reduce Motion 海报。`internal/settings`/`cmd/lucia` 覆盖 Store 并发/失败/字段保留与 fallback active 清理；`internal/ui` 覆盖素材包列表、无效包说明、导入授权、导入后启用、替换 active 失败回退与删除。
 
 macOS 真机手工检查（待补验）：
 

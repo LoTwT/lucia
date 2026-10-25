@@ -27,7 +27,7 @@ go run ./cmd/lucia
 
 桌宠默认使用内嵌的鲸鱼静态素材。透明动画 WebP 素材包可以安装在用户数据目录，**不进入仓库、CI 或安装包**。
 
-终端用户流程：打开控制台的“素材包”页，选择 zip、确认本地使用授权、导入并启用；同名包需要显式勾选替换。导入会校验 manifest、每个 clip 的帧结构与 SHA-256（manifest 提供时逐 clip 核对并写入新摘要）、裁剪、热区和预设引用。失败时保留原素材，成功后桌宠立即切换，无需重启。也可以删除未启用的素材包或切回内置鲸鱼。
+终端用户流程：打开控制台的“素材包”页，选择 zip、确认本地使用授权、导入并启用；同名包需要显式勾选替换。导入会校验 manifest、每个 clip 的帧结构与 SHA-256（manifest 提供时逐 clip 核对并写入新摘要）、裁剪、热区和预设引用。失败时保留原素材，成功后桌宠立即切换，无需重启。也可以删除未启用的素材包或切回内置鲸鱼。导入、替换和预览在 UI 线程同步执行，大包会短暂卡顿。
 
 开发工具流程：
 
@@ -36,7 +36,7 @@ go run ./cmd/petpack -zip naiwa.zip
 go run ./cmd/petpack -check <数据目录>/packs/naiwa -strict
 ```
 
-默认自动选择最近使用的数据目录（`Lucia Dev`、`lucia` 或打包版 `Lucia`），也可以显式传 `-app`。数据目录跟随应用名：`go tool mygo dev` 是 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 是 `lucia`，打包版是 `Lucia`。开发工具导入后若应用正在运行，需要重启或从控制台切换；`-force` 覆盖同名包，`-activate=false` 只导入不切换。素材包缺失或损坏时应用会回退内置鲸鱼。
+默认自动选择最近使用的数据目录（`Lucia Dev`、`lucia` 或打包版 `Lucia`），也可以显式传 `-app`。数据目录跟随应用名：`go tool mygo dev` 是 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 是 `lucia`，打包版是 `Lucia`。**不要在 Lucia 运行时同时执行开发工具导入**：CLI 导入前先退出应用，或改用控制台。`-force` 覆盖同名包，`-activate=false` 只导入不切换。`-check <dir> -strict` 读取磁盘原始 manifest，要求显式 schema 2、hotzones 和 presets。素材包缺失或损坏时应用会回退内置鲸鱼，并清除失效的 active 选择。
 
 schema 2 在旧字段之上增加 `hotzones`、`presets` 和动作级 `timing`；schema 1 仍可读取，并在内存中升级为 schema 2 默认值。完整字段与示例见 [桌宠规格](docs/specs/desktop-pet.md#schema-2-热区预设与时序) 和 [示例 manifest](docs/examples/pet-pack.schema2.json)。
 

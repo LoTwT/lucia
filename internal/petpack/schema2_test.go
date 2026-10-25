@@ -83,6 +83,9 @@ func TestSchema2Validation(t *testing.T) {
 		{"hotzone action", func(m *Manifest) {
 			m.Hotzones = map[string]Hotzone{"face": {Preset: "tap", Action: "missing", Rect: Face{Width: 1, Height: 1}}}
 		}, "missing action"},
+		{"hotzone looping action", func(m *Manifest) {
+			m.Hotzones = map[string]Hotzone{"face": {Preset: "tap", Action: "idle", Rect: Face{Width: 1, Height: 1}}}
+		}, "loops until interrupted"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -99,6 +102,19 @@ func TestSchema2Validation(t *testing.T) {
 	}
 }
 
+func TestWindowsReservedPackIDs(t *testing.T) {
+	for _, id := range []string{"con", "CON", "aux", "nul", "com1", "LPT9"} {
+		if validPackDirID(id) {
+			t.Errorf("validPackDirID accepted reserved name %q", id)
+		}
+	}
+	for _, id := range []string{"console", "com0", "lpt10", "tiny", "tiny-pack"} {
+		if !validPackDirID(id) {
+			t.Errorf("validPackDirID rejected %q", id)
+		}
+	}
+}
+
 func TestDocumentedSchema2ExampleIsValid(t *testing.T) {
 	body, err := os.ReadFile("../../docs/examples/pet-pack.schema2.json")
 	if err != nil {
@@ -111,6 +127,24 @@ func TestDocumentedSchema2ExampleIsValid(t *testing.T) {
 	normalizeManifest(&manifest)
 	if err := validateManifest("example", manifest); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReadRawManifestKeepsAuthoredSchema(t *testing.T) {
+	dir := writeTinyPack(t)
+	raw, err := ReadRawManifest(filepath.Join(dir, "packs", "tiny"), "tiny")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw.Schema != 1 || len(raw.Hotzones) != 0 || len(raw.Presets) != 0 {
+		t.Fatalf("raw manifest = schema %d, hotzones %d, presets %d", raw.Schema, len(raw.Hotzones), len(raw.Presets))
+	}
+	normalized, err := ReadManifest(filepath.Join(dir, "packs", "tiny"), "tiny")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.Schema != 2 || len(normalized.Hotzones) == 0 || len(normalized.Presets) == 0 {
+		t.Fatalf("normalized manifest = schema %d, hotzones %d, presets %d", normalized.Schema, len(normalized.Hotzones), len(normalized.Presets))
 	}
 }
 

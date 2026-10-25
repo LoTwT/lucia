@@ -94,6 +94,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("lucia: pet assets: %v", err)
 	}
+	if prefs.PetPack != "" && !petModel.Animated() {
+		log.Printf("lucia: pet pack %q failed to load; clearing the active selection", prefs.PetPack)
+		if err := clearFallbackActive(settingsStore, packStore, &prefs); err != nil {
+			log.Printf("lucia: clear active pack: %v", err)
+		}
+	}
 	petModel.SetScale(prefs.PetScale)
 	if scale := petModel.Scale(); scale != prefs.PetScale {
 		updated, err := settingsStore.Update(func(s *settings.Settings) { s.PetScale = scale })
@@ -306,9 +312,13 @@ func main() {
 			return err
 		}
 		prefs = updated
+		oldModel := petModel
 		petModel = next
 		if petWin != nil {
 			petWin.SetModel(next)
+		}
+		if oldModel != nil {
+			oldModel.Close()
 		}
 		if bubbleWin != nil {
 			bubbleWin.Hide()
@@ -478,6 +488,25 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("lucia: exited")
+}
+
+// clearFallbackActive removes a selected pack after the startup load failed
+// and the built-in pet took over. Keeping it active would make the console
+// claim a pack is in use while the pet window shows the whale.
+func clearFallbackActive(settingsStore *settings.Store, packStore *petpack.Store, prefs *settings.Settings) error {
+	old := prefs.PetPack
+	if err := packStore.SetActive(""); err != nil {
+		return err
+	}
+	updated, err := settingsStore.Update(func(s *settings.Settings) {
+		s.PetPack = ""
+	})
+	if err != nil {
+		_ = packStore.SetActive(old)
+		return err
+	}
+	*prefs = updated
+	return nil
 }
 
 // updateUISettings merges the presentation fields owned by the console into

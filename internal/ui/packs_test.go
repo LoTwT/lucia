@@ -143,6 +143,45 @@ func TestImportPackUsesReplaceWhenRequested(t *testing.T) {
 	}
 }
 
+func TestReplaceActivePackFallsBackToBuiltInWhenActivationFails(t *testing.T) {
+	packs := []PackSummary{testPack(true)}
+	var activated []string
+	model := New(Config{
+		Version:  "0.0.1",
+		DataDir:  "/tmp/lucia",
+		Updates:  updates.New(disabledSource{}, "0.0.1"),
+		Settings: settings.Default(),
+		LoadPacks: func() ([]PackSummary, error) {
+			return packs, nil
+		},
+		LoadPackPreview: func(string) ([]byte, error) { return previewPNG(t), nil },
+		ImportPack: func(string, bool) (PackSummary, error) {
+			return testPack(true), nil
+		},
+		ReplacePack: func(string, bool) (PackSummary, error) {
+			return testPack(true), nil
+		},
+		ActivatePack: func(id string) error {
+			activated = append(activated, id)
+			if id != "" {
+				return errors.New("activation failed")
+			}
+			return nil
+		},
+	})
+	model.refreshPacks()
+	model.packZip = "tiny.zip"
+	model.packLicense = true
+	model.packReplace = true
+	model.importPack()
+	if len(activated) != 2 || activated[0] != "tiny" || activated[1] != "" {
+		t.Fatalf("activation calls = %v, want [tiny empty]", activated)
+	}
+	if model.packActionErr == "" {
+		t.Fatal("replace failure was not reported")
+	}
+}
+
 func TestImportPackKeepsImportedWhenActivationFails(t *testing.T) {
 	model, _, _ := newPacksTestModel(t, nil)
 	model.cfg.ActivatePack = func(string) error { return errors.New("boom") }
@@ -154,6 +193,32 @@ func TestImportPackKeepsImportedWhenActivationFails(t *testing.T) {
 	}
 	if len(model.packs) != 1 || model.packSelected != "tiny" {
 		t.Fatalf("imported pack disappeared: %+v selected=%q", model.packs, model.packSelected)
+	}
+}
+
+func TestPreviewRetriesAfterFailure(t *testing.T) {
+	attempts := 0
+	model := New(Config{
+		Version:  "0.0.1",
+		DataDir:  "/tmp/lucia",
+		Updates:  updates.New(disabledSource{}, "0.0.1"),
+		Settings: settings.Default(),
+		LoadPackPreview: func(string) ([]byte, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, errors.New("temporary failure")
+			}
+			return previewPNG(t), nil
+		},
+	})
+	model.packSelected = "tiny"
+	model.loadPackPreview()
+	if model.packPreviewErr == "" {
+		t.Fatal("first preview failure was not reported")
+	}
+	model.loadPackPreview()
+	if model.packPreview == nil || model.packPreviewErr != "" || attempts != 2 {
+		t.Fatalf("attempts=%d preview=%v err=%q", attempts, model.packPreview != nil, model.packPreviewErr)
 	}
 }
 

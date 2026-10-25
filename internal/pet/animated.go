@@ -342,6 +342,23 @@ func (a *animatedModel) startIdle(now time.Time) {
 	}
 }
 
+func (a *animatedModel) close() {
+	if a == nil {
+		return
+	}
+	if a.current != nil && a.current.provider != nil {
+		a.current.provider.Close()
+	}
+	a.current = nil
+	a.clearSequence()
+	a.pendingOnce = ""
+	a.queuedOnce = nil
+	a.pendingReaction = ReactionNone
+	a.pendingDrag = false
+	a.pendingDrop = false
+	a.dragActive = false
+}
+
 func (a *animatedModel) requestPreset(presetID, action string) bool {
 	if a.reduceMotion || presetID == "" {
 		return false
@@ -466,6 +483,7 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 		}
 		a.pendingDrag = false
 		a.pendingDrop = false
+		a.dragActive = false
 		a.pendingReaction = ReactionNone
 		a.pendingOnce = ""
 		a.queuedOnce = nil
@@ -517,13 +535,22 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 	}
 
 	if a.sequenceIndex < len(a.sequence) && (a.current == nil || a.current.actionID == "idle") {
+		// The first step's delay starts when the preset is requested. Later
+		// delays are scheduled by finishCurrent; keeping idle alive while
+		// waiting avoids freezing on a static poster for up to a minute.
+		if a.sequenceAt.IsZero() && a.sequenceIndex == 0 {
+			if delay := a.sequence[0].DelayMs; delay > 0 {
+				a.sequenceAt = now.Add(time.Duration(delay) * time.Millisecond)
+				if a.current == nil {
+					a.startIdle(now)
+				}
+			}
+		}
 		if a.sequenceAt.IsZero() || !now.Before(a.sequenceAt) {
 			if a.startNextSequence(now) {
 				a.advance(now)
 				return
 			}
-		} else {
-			return
 		}
 	}
 
@@ -674,6 +701,7 @@ func (a *animatedModel) finishCurrent(now time.Time) {
 	if a.sequenceIndex < len(a.sequence) {
 		if delay := a.sequence[a.sequenceIndex].DelayMs; delay > 0 {
 			a.sequenceAt = now.Add(time.Duration(delay) * time.Millisecond)
+			a.startIdle(now)
 		} else {
 			a.sequenceAt = time.Time{}
 		}
@@ -756,16 +784,27 @@ func (a *animatedModel) nextDelay(now time.Time, activity Activity, idle time.Du
 		return 0
 	}
 	if a.sequenceIndex < len(a.sequence) && (a.current == nil || a.current.actionID == "idle") {
-		if a.sequenceAt.IsZero() {
-			return time.Millisecond
+		wait := time.Millisecond
+		if !a.sequenceAt.IsZero() {
+			wait = max(a.sequenceAt.Sub(now), time.Millisecond)
 		}
-		return max(a.sequenceAt.Sub(now), time.Millisecond)
+		if a.current != nil && a.current.provider != nil {
+			duration := a.current.provider.Duration(a.current.frame)
+			if duration <= 0 {
+				duration = 33 * time.Millisecond
+			}
+			idleWait := max(duration-now.Sub(a.current.frameStart), time.Millisecond)
+			if idleWait < wait {
+				return idleWait
+			}
+		}
+		return wait
 	}
 	if a.current != nil && a.current.provider != nil {
 		if a.current.provider.Failed() {
-			// Stop asking for frames after a decode error. The next sync or
-			// interaction will finish the broken clip and return to idle.
-			return 0
+			// Ask for one more frame so sync can finish the broken clip and
+			// return to idle. Returning zero here would freeze on the poster.
+			return time.Millisecond
 		}
 		if !a.current.holdUntil.IsZero() {
 			return max(a.current.holdUntil.Sub(now), time.Millisecond)

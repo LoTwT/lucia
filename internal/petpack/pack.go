@@ -164,7 +164,7 @@ func LoadDir(dir, id string, displayScale float64) (*Pack, error) {
 // ReadManifest parses and validates only the manifest. Management listing
 // uses it so a broken clip does not make an otherwise visible pack vanish.
 func ReadManifest(dir, id string) (Manifest, error) {
-	if !validPackID(id) {
+	if !validPackDirID(id) {
 		return Manifest{}, fmt.Errorf("petpack: invalid pack id %q", id)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "pack.json"))
@@ -182,11 +182,29 @@ func ReadManifest(dir, id string) (Manifest, error) {
 	return manifest, nil
 }
 
+// ReadRawManifest parses pack.json without applying schema defaults. The
+// strict authoring check needs to distinguish an explicit schema 2 hotzone
+// from one synthesized for a schema 1 pack.
+func ReadRawManifest(dir, id string) (Manifest, error) {
+	if !validPackDirID(id) {
+		return Manifest{}, fmt.Errorf("petpack: invalid pack id %q", id)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "pack.json"))
+	if err != nil {
+		return Manifest{}, fmt.Errorf("petpack %q: read manifest: %w", id, err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return Manifest{}, fmt.Errorf("petpack %q: parse manifest: %w", id, err)
+	}
+	return manifest, nil
+}
+
 // loadPackDir validates a pack from its final directory. Import uses it after
 // installing the new directory, without assuming the parent directory is
 // named "packs".
 func loadPackDir(dir, id string, displayScale float64) (*Pack, error) {
-	if !validPackID(id) {
+	if !validPackDirID(id) {
 		return nil, fmt.Errorf("petpack: invalid pack id %q", id)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "pack.json"))
@@ -358,11 +376,8 @@ func validateManifest(id string, manifest Manifest) error {
 			if !ok {
 				return fmt.Errorf("petpack %q preset %q step %d references missing action %q", id, presetID, i, step.Action)
 			}
-			if action.LoopCount < 0 {
-				return fmt.Errorf("petpack %q preset %q step %d uses looping action %q", id, presetID, i, step.Action)
-			}
-			if action.Once == "" && action.Enter == "" && action.Loop == "" && action.Exit == "" {
-				return fmt.Errorf("petpack %q preset %q step %d action %q has no clip", id, presetID, i, step.Action)
+			if err := validateFiniteAction(step.Action, action); err != nil {
+				return fmt.Errorf("petpack %q preset %q step %d: %w", id, presetID, i, err)
 			}
 			if step.DelayMs < 0 || step.DelayMs > 60000 {
 				return fmt.Errorf("petpack %q preset %q step %d: delay %d outside 0..60000", id, presetID, i, step.DelayMs)
@@ -385,8 +400,12 @@ func validateManifest(id string, manifest Manifest) error {
 			return fmt.Errorf("petpack %q hotzone %q: missing preset %q", id, hotzoneID, zone.Preset)
 		}
 		if zone.Action != "" {
-			if _, ok := manifest.Actions[zone.Action]; !ok {
+			action, ok := manifest.Actions[zone.Action]
+			if !ok {
 				return fmt.Errorf("petpack %q hotzone %q: missing action %q", id, hotzoneID, zone.Action)
+			}
+			if err := validateFiniteAction(zone.Action, action); err != nil {
+				return fmt.Errorf("petpack %q hotzone %q: %w", id, hotzoneID, err)
 			}
 		}
 	}
@@ -395,6 +414,16 @@ func validateManifest(id string, manifest Manifest) error {
 
 func actionClips(action Action) []string {
 	return []string{action.Enter, action.Loop, action.Exit, action.Once}
+}
+
+func validateFiniteAction(actionID string, action Action) error {
+	if action.LoopCount < 0 {
+		return fmt.Errorf("action %q loops until interrupted", actionID)
+	}
+	if action.Once == "" && action.Enter == "" && action.Loop == "" && action.Exit == "" {
+		return fmt.Errorf("action %q has no clip", actionID)
+	}
+	return nil
 }
 
 // normalizeManifest turns schema 1 into the same in-memory shape as schema 2
@@ -511,6 +540,24 @@ func validPackID(id string) bool {
 		}
 	}
 	return true
+}
+
+// validPackDirID excludes names Windows reserves for devices. Preset and
+// hotzone ids do not become paths and intentionally still use validPackID.
+func validPackDirID(id string) bool {
+	return validPackID(id) && !windowsReservedPackID(id)
+}
+
+func windowsReservedPackID(id string) bool {
+	switch strings.ToLower(id) {
+	case "con", "prn", "aux", "nul":
+		return true
+	}
+	lower := strings.ToLower(id)
+	if len(lower) == 4 && (strings.HasPrefix(lower, "com") || strings.HasPrefix(lower, "lpt")) {
+		return lower[3] >= '1' && lower[3] <= '9'
+	}
+	return false
 }
 
 func packPath(dir, name string) (string, error) {

@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/LoTwT/lucia/internal/petpack"
 	"github.com/LoTwT/lucia/internal/settings"
 )
 
@@ -34,5 +35,32 @@ func TestUpdateUISettingsPreservesRuntimeFields(t *testing.T) {
 	}
 	if persisted.PetPack != "naiwa" || !persisted.PetIntroPlayed {
 		t.Fatalf("persisted runtime fields changed: %+v", persisted)
+	}
+}
+
+func TestClearFallbackActiveResetsModelAndSettings(t *testing.T) {
+	data := t.TempDir()
+	prefs := settings.Default()
+	prefs.PetPack = "broken"
+	settingsStore := settings.NewStore(data, prefs)
+	packStore := petpack.NewStore(data, prefs.PetPack)
+	if err := packStore.SetActive(prefs.PetPack); err != nil {
+		t.Fatal(err)
+	}
+	if err := clearFallbackActive(settingsStore, packStore, &prefs); err != nil {
+		t.Fatal(err)
+	}
+	if prefs.PetPack != "" {
+		t.Fatalf("prefs.PetPack = %q, want empty", prefs.PetPack)
+	}
+	if packStore.Active() != "" {
+		t.Fatalf("store active = %q, want empty", packStore.Active())
+	}
+	persisted, err := settings.Load(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.PetPack != "" {
+		t.Fatalf("persisted PetPack = %q, want empty", persisted.PetPack)
 	}
 }

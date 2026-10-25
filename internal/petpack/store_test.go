@@ -90,6 +90,79 @@ func TestStoreImportRequiresLicenseAndDoesNotOverwrite(t *testing.T) {
 	}
 }
 
+func TestImportMetaOnlyBuildsDefaultPresetSteps(t *testing.T) {
+	data := t.TempDir()
+	zipPath := writeMetaOnlyZip(t, data)
+	pack, err := ImportZip(zipPath, filepath.Join(data, "out"), ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"tap", "pat"} {
+		preset, ok := pack.Preset(id)
+		if !ok || len(preset.Steps) == 0 {
+			t.Fatalf("%s preset = %+v, want a default step after actions are built", id, preset)
+		}
+	}
+}
+
+func TestStoreReplaceFailureRestoresHealthyPack(t *testing.T) {
+	data := t.TempDir()
+	store := NewStore(data, "")
+	if _, err := store.Import(writeStoreZip(t, data, true), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetActive("tiny"); err != nil {
+		t.Fatal(err)
+	}
+	badZip := writeZipWithManifest(t, data, "bad-tiny.zip", func(m *Manifest) {
+		m.Actions["idle"] = Action{Loop: "missing", Poster: "idle_loop#0", LoopCount: -1}
+	})
+	if _, err := store.Replace(badZip, true); err == nil {
+		t.Fatal("Replace accepted a pack with a missing idle clip")
+	}
+	list, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "tiny" || !list[0].Active || !list[0].Valid {
+		t.Fatalf("healthy pack was not restored: %+v", list)
+	}
+	if _, err := Load(data, "tiny", 1); err != nil {
+		t.Fatalf("restored pack does not load: %v", err)
+	}
+}
+
+func TestStoreRecoverCorruptMetadata(t *testing.T) {
+	data := t.TempDir()
+	if err := os.WriteFile(filepath.Join(data, LockFile), []byte("{bad lock"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, PendingFile), []byte("{bad pending"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(data, "")
+	if err := store.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{LockFile + ".bad", PendingFile + ".bad"} {
+		if _, err := os.Stat(filepath.Join(data, name)); err != nil {
+			t.Fatalf("%s was not preserved: %v", name, err)
+		}
+	}
+	if _, err := store.List(); err != nil {
+		t.Fatalf("List after corrupt metadata: %v", err)
+	}
+}
+
+func TestStoreDeleteRejectsRecoveryArtifacts(t *testing.T) {
+	store := NewStore(t.TempDir(), "")
+	for _, id := range []string{".backup", "tiny.backup", ".import-tiny"} {
+		if err := store.Delete(id); err == nil {
+			t.Errorf("Delete accepted recovery artifact %q", id)
+		}
+	}
+}
+
 func TestStoreImportWithoutManifestUsesFilenameAndDefaults(t *testing.T) {
 	data := t.TempDir()
 	store := NewStore(data, "")
@@ -305,6 +378,87 @@ func writeStoreZip(t *testing.T, dir string, withManifest bool) string {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "tiny.zip")
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeMetaOnlyZip(t *testing.T, dir string) string {
+	t.Helper()
+	clip, err := os.ReadFile("testdata/tiny.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	for _, id := range []string{"idle_loop", "happy_enter", "happy_exit", "laugh_enter", "laugh_exit"} {
+		entry, err := writer.Create(id + ".webp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write(clip); err != nil {
+			t.Fatal(err)
+		}
+	}
+	meta := validTestManifest()
+	meta.Clips = nil
+	meta.Actions = nil
+	body, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := writer.Create("pack.meta.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "meta-tiny.zip")
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeZipWithManifest(t *testing.T, dir, name string, mutate func(*Manifest)) string {
+	t.Helper()
+	clip, err := os.ReadFile("testdata/tiny.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := validTestManifest()
+	if mutate != nil {
+		mutate(&manifest)
+	}
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	entry, err := writer.Create("idle_loop.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write(clip); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err = writer.Create("pack.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}

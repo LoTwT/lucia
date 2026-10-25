@@ -362,7 +362,7 @@ func (m *Model) loadPackPreview() {
 		m.packPreviewErr = ""
 		return
 	}
-	if m.packPreviewID == m.packSelected {
+	if m.packPreviewID == m.packSelected && m.packPreview != nil && m.packPreviewErr == "" {
 		return
 	}
 	m.packPreviewID = m.packSelected
@@ -386,6 +386,7 @@ func (m *Model) importPack() {
 	if m.cfg.ImportPack == nil || m.packZip == "" || !m.packLicense {
 		return
 	}
+	previousActive := m.activePackID()
 	importFn := m.cfg.ImportPack
 	if m.packReplace && m.cfg.ReplacePack != nil {
 		importFn = m.cfg.ReplacePack
@@ -401,6 +402,15 @@ func (m *Model) importPack() {
 	m.packSelected = pack.ID
 	if err := m.activatePackBackend(pack.ID); err != nil {
 		m.packActionErr = fmt.Sprintf("素材包已导入，但启用失败：%v", err)
+		m.packNotice = fmt.Sprintf("已导入 %s，但未启用。", pack.Name)
+		if previousActive == pack.ID {
+			if fallbackErr := m.activatePackBackend(""); fallbackErr != nil {
+				m.packActionErr += fmt.Sprintf("；回退内置鲸鱼也失败：%v", fallbackErr)
+			} else {
+				m.packActionErr += "；已切回内置鲸鱼，旧素材包不再被运行中的模型占用"
+				m.packNotice = fmt.Sprintf("已导入 %s，但启用失败；已切回内置鲸鱼。", pack.Name)
+			}
+		}
 	} else {
 		m.packNotice = fmt.Sprintf("已导入并启用 %s。", pack.Name)
 	}

@@ -286,7 +286,7 @@ func (failingProvider) Failed() bool                  { return true }
 func (failingProvider) Reset()                        {}
 func (failingProvider) Close()                        {}
 
-func TestAnimatedDecodeFailureStopsScheduling(t *testing.T) {
+func TestAnimatedDecodeFailureSchedulesRecovery(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	now := time.Now()
 	m.animated.current = &clipPlay{
@@ -295,8 +295,8 @@ func TestAnimatedDecodeFailureStopsScheduling(t *testing.T) {
 		provider:   failingProvider{},
 		frameStart: now,
 	}
-	if delay := m.animated.nextDelay(now, ActivityAwake, 0, time.Time{}, false); delay != 0 {
-		t.Fatalf("nextDelay = %v, want 0 after a decode failure", delay)
+	if delay := m.animated.nextDelay(now, ActivityAwake, 0, time.Time{}, false); delay <= 0 {
+		t.Fatalf("nextDelay = %v, want a positive delay so sync can recover", delay)
 	}
 	m.animated.advance(now)
 	if m.animated.current == nil || m.animated.current.actionID != "idle" {

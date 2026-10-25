@@ -221,3 +221,60 @@ func TestActionTimingHoldsLastFrame(t *testing.T) {
 		t.Fatalf("current = %+v, want idle after hold", m.animated.current)
 	}
 }
+
+func TestPresetFirstStepDelayKeepsIdleAlive(t *testing.T) {
+	m, pack := newInteractionModel(t)
+	pack.Manifest.Presets["tap"] = petpack.Preset{
+		Reaction: "face", Bubble: "face",
+		Steps: []petpack.PresetStep{{Action: "laugh", DelayMs: 100}},
+	}
+	width, height := m.WindowSize()
+	tt := ui.NewTester(m.View, width, height)
+	tt.Frame()
+	m.TriggerHotzone("face")
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "idle" {
+		t.Fatalf("current = %+v, want idle during the first delay", m.animated.current)
+	}
+	tt.Advance(60 * time.Millisecond)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID == "laugh" {
+		t.Fatalf("laugh started before the first delay: %+v", m.animated.current)
+	}
+	tt.Advance(60 * time.Millisecond)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "laugh" {
+		t.Fatalf("current = %+v, want laugh after the first delay", m.animated.current)
+	}
+}
+
+func TestPresetFallbackUsesPresetReaction(t *testing.T) {
+	m, pack := newInteractionModel(t)
+	pack.Manifest.Presets["pat"] = petpack.Preset{Reaction: "pat", Bubble: "pat"}
+	zone := pack.Manifest.Hotzones["head"]
+	zone.Action = ""
+	pack.Manifest.Hotzones["head"] = zone
+	m.Close()
+	m, err := NewAnimated(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, _ := pack.Clip("idle_loop")
+	m.animated.cacheIdle(idle)
+	tt := ui.NewTester(m.View, 20, 20)
+	tt.Frame()
+	m.TriggerHotzone("head")
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "happy" {
+		t.Fatalf("current = %+v, want happy from the pat reaction fallback", m.animated.current)
+	}
+}
+
+func TestReduceMotionClearsDragActive(t *testing.T) {
+	m, _ := newInteractionModel(t)
+	m.animated.dragActive = true
+	m.animated.sync(time.Now(), ActivityAwake, 0, false, ReactionNone, time.Time{}, true)
+	if m.animated.dragActive {
+		t.Fatal("Reduce Motion left dragActive set")
+	}
+}

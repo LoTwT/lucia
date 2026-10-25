@@ -139,17 +139,17 @@ func detectAppName() string {
 func checkPack(dir string, strict bool) {
 	clean := filepath.Clean(dir)
 	id := filepath.Base(clean)
-	manifest, err := petpack.ReadManifest(clean, id)
-	if err != nil {
-		log.Fatal(err)
-	}
 	if strict {
-		if len(manifest.Hotzones) == 0 {
-			log.Fatalf("petpack %q: strict check requires at least one hotzone", id)
+		raw, err := petpack.ReadRawManifest(clean, id)
+		if err != nil {
+			log.Fatal(err)
 		}
-		if len(manifest.Presets) == 0 {
-			log.Fatalf("petpack %q: strict check requires at least one preset", id)
+		if err := strictManifestError(id, raw); err != nil {
+			log.Fatal(err)
 		}
+	}
+	if _, err := petpack.ReadManifest(clean, id); err != nil {
+		log.Fatal(err)
 	}
 	pack, err := petpack.LoadDir(clean, id, 1)
 	if err != nil {
@@ -162,4 +162,17 @@ func checkPack(dir string, strict bool) {
 	fmt.Printf("pack=%s schema=%d clips=%d frames=%d hotzones=%d presets=%d\n",
 		pack.Manifest.ID, pack.Manifest.Schema, len(pack.Clips), frames,
 		len(pack.Manifest.Hotzones), len(pack.Manifest.Presets))
+}
+
+func strictManifestError(id string, raw petpack.Manifest) error {
+	if raw.Schema != 2 {
+		return fmt.Errorf("petpack %q: strict check requires schema 2 on disk, got %d", id, raw.Schema)
+	}
+	if len(raw.Hotzones) == 0 {
+		return fmt.Errorf("petpack %q: strict check requires at least one explicit hotzone", id)
+	}
+	if len(raw.Presets) == 0 {
+		return fmt.Errorf("petpack %q: strict check requires at least one explicit preset", id)
+	}
+	return nil
 }

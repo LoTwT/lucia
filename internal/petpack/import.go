@@ -72,7 +72,7 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	if opts.ID == "" {
 		return nil, fmt.Errorf("petpack import: empty pack id")
 	}
-	if !validPackID(opts.ID) {
+	if !validPackDirID(opts.ID) {
 		return nil, fmt.Errorf("petpack import: invalid pack id %q", opts.ID)
 	}
 	if opts.Name == "" {
@@ -461,9 +461,9 @@ func buildActions(imported map[string]importedClip) map[string]Action {
 	return actions
 }
 
-// ReadZipManifest inspects a pack zip without extracting artwork. The
-// returned manifest is normalized but not validated against clips, so the
-// console can show the pack id and license before asking for confirmation.
+// ReadZipManifest inspects a pack zip without extracting artwork. It returns
+// the manifest as authored, without schema defaults, so the importer can
+// build actions first and then fill the default presets from them.
 func ReadZipManifest(zipPath string) (Manifest, bool, error) {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -501,7 +501,6 @@ func readZipManifest(files []*zip.File) (Manifest, bool, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return Manifest{}, true, fmt.Errorf("parse %s: %w", entry.Name, err)
 	}
-	normalizeManifest(&manifest)
 	return manifest, true, nil
 }
 

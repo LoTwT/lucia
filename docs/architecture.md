@@ -32,7 +32,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 4. `RequestSingleInstanceLock`；第二个实例把命令行交给第一个实例后直接退出，不接触日志与数据文件。
 5. 打开诊断日志，写入首行 `version=… commit=… platform=… data=… logs=…`。打不开日志不阻止启动。
 6. 读取设置，并构造进程内唯一的 `settings.Store`。文件缺失用默认值；文件损坏记录原因并继续用默认值。
-7. 构造 `petpack.Store`，先执行 `Recover` 清理中断的导入、恢复 `.backup`、重建 lockfile，再把 `petPack` 写入 active；构造更新管理器，把 `CheckUpdatesOnLaunch` 同步到管理器的自动检查开关；构造桌宠模型：`petPack` 非空时从 `<数据目录>/packs/<id>` 加载外部动画包，失败则记录日志并退回内嵌鲸鱼。动画包在后台解码 idle 缓存，首帧海报立即可见。
+7. 构造 `petpack.Store`，先执行 `Recover` 清理中断的导入、恢复 `.backup`、重建 lockfile，再把 `petPack` 写入 active；构造更新管理器，把 `CheckUpdatesOnLaunch` 同步到管理器的自动检查开关；构造桌宠模型：`petPack` 非空时从 `<数据目录>/packs/<id>` 加载外部动画包，失败则记录日志、退回内嵌鲸鱼并清除 active 选择，避免控制台状态与桌面不一致。动画包在后台解码 idle 缓存，首帧海报立即可见。
 8. 注册单实例、激活、`lucia://` 深链接、退出前与最后窗口关闭回调；设置应用菜单。
 9. `WhenReady` 中创建桌宠窗口、默认隐藏的气泡窗口与默认隐藏的控制台窗口，创建托盘，接上管理器的重绘与安装完成回调，再启动自动检查循环。
 10. `App.Run`。退出后记录 `exited`。
@@ -59,9 +59,9 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 - 安装事务：`petpack.Store` 串行化导入/删除/激活，`packs.lock.json` 缓存已安装元数据，`packs.pending.json` 记录导入阶段。启动时 `Recover` 清理 `.import-*`/`.trash-*`、恢复 `.backup`、删除已完成的 pending，并从磁盘重建 lockfile。正在使用的包不能删除；控制台可先切回内置鲸鱼。
 - 解码：`internal/petpack` 解析 WebP RIFF/ANMF，使用 `golang.org/x/image/webp` decode 单帧，再按 blend/dispose 顺序合成；不引入 cgo。每帧保留自身时长，支持特殊动作的长停顿帧。
 - 播放：`internal/pet` 的动画外观按 UI 时钟推进 `enter → loop → exit`；idle 预解码缓存，其他 clip 在 UI 线程顺序解码。缓存为后台工作，不驱动 UI。Reduce Motion 使用海报帧。
-- 导入：控制台和 `cmd/petpack` 共用导入器。读取 zip 根部的 `pack.json`/`pack.meta.json`（4 MiB 上限），优先使用带 CRC32 校验的 0x7075 Unicode Path，回退 GBK；只接受 `.webp`，跳过 `__MACOSX/` 与 `._*` 资源叉，限制单文件 64 MiB、总量 512 MiB，写临时目录后备份旧包、安装并校验，失败回滚，写入 `license.status = "local-only"`。控制台导入前要求勾选本地授权；同名包不会被静默覆盖。
-- 控制台：素材包页列出有效/无效包、schema、clip/帧/热区/预设数量与授权状态，生成静态海报预览、叠加热区，并列出预设步骤与动作停留时序；导入后立即加载新模型并切换，失败则保留旧模型和旧设置。
-- 回退：manifest/解码/海报任一失败都记录日志并使用内嵌鲸鱼；可选素材不能阻止应用启动。
+- 导入：控制台和 `cmd/petpack` 共用导入器。读取 zip 中任意层级最浅的 `pack.json`/`pack.meta.json`（4 MiB 上限），优先使用带 CRC32 校验的 0x7075 Unicode Path，回退 GBK；只接受 `.webp`，跳过 `__MACOSX/` 与 `._*` 资源叉，限制单文件 64 MiB、总量 512 MiB，写临时目录后备份旧包、安装并校验，失败回滚，写入 `license.status = "local-only"`。控制台导入前要求勾选本地授权；同名包不会被静默覆盖。
+- 控制台：素材包页列出有效/无效包、schema、clip/帧/热区/预设数量与授权状态，生成静态海报预览、叠加热区，并列出预设步骤与动作停留时序；导入后立即加载新模型并切换，失败则保留旧模型和旧设置；替换正在使用的包后若启用失败，会切回内置鲸鱼。导入/替换/预览同步跑在 UI 线程，大包会短暂阻塞控制台。运行中的应用与 `cmd/petpack` 不能并发导入（只有进程内互斥）。
+- 回退：manifest/解码/海报任一失败都记录日志并使用内嵌鲸鱼，并清除失效的 active 选择；可选素材不能阻止应用启动。
 - 分发：naiwa 等外部素材不进入 Git、CI、DMG/NSIS 或发布资产；授权由用户本地确认。
 
 ## 4. 更新状态机

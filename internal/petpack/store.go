@@ -116,13 +116,16 @@ func (s *Store) Active() string {
 func (s *Store) SetActive(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.active = id
 	lock, err := s.loadLocked()
 	if err != nil {
 		return err
 	}
 	lock.Active = id
-	return s.saveLockLocked(lock)
+	if err := s.saveLockLocked(lock); err != nil {
+		return err
+	}
+	s.active = id
+	return nil
 }
 
 // Recover cleans interrupted imports and rebuilds the lockfile from the
@@ -324,7 +327,7 @@ func (s *Store) importPack(zipPath string, acceptLicense, replace bool) (Summary
 	if id == "" {
 		id = idFromZipName(zipPath)
 	}
-	if !validPackID(id) {
+	if !validPackDirID(id) {
 		return Summary{}, fmt.Errorf("无法从压缩包确定合法的素材包 id（%q）", id)
 	}
 	final := filepath.Join(s.PacksDir(), id)
@@ -396,7 +399,8 @@ func (s *Store) Delete(id string) error {
 	if id == s.active {
 		return errors.New("正在使用的素材包不能删除")
 	}
-	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) || filepath.Base(id) != id {
+	if id == "" || id == "." || id == ".." || strings.HasPrefix(id, ".") ||
+		strings.HasSuffix(id, ".backup") || strings.ContainsAny(id, `/\`) || filepath.Base(id) != id {
 		return fmt.Errorf("invalid pack id %q", id)
 	}
 	dir := filepath.Join(s.PacksDir(), id)
@@ -510,7 +514,6 @@ func (s *Store) loadLocked() (*lockfile, error) {
 
 func (s *Store) saveLockLocked(lock *lockfile) error {
 	lock.Schema = 1
-	lock.Active = s.active
 	data, err := json.MarshalIndent(lock, "", "  ")
 	if err != nil {
 		return err
@@ -534,7 +537,7 @@ func (s *Store) refreshLockLocked(lock *lockfile) error {
 			continue
 		}
 		id := entry.Name()
-		if strings.HasPrefix(id, ".") || strings.HasSuffix(id, ".backup") || !validPackID(id) {
+		if strings.HasPrefix(id, ".") || strings.HasSuffix(id, ".backup") || !validPackDirID(id) {
 			continue
 		}
 		dir := filepath.Join(s.PacksDir(), id)
