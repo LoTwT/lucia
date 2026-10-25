@@ -25,22 +25,22 @@ go run ./cmd/lucia
 
 ## 外部动画素材包
 
-桌宠默认使用内嵌的鲸鱼静态素材。透明动画 WebP 素材包可以安装在用户数据目录，**不进入仓库、CI 或安装包**。
+桌宠默认使用内嵌的鲸鱼素材包。透明动画 WebP 素材包可以安装在用户数据目录，**不进入仓库、CI 或安装包**。内置包与外部包使用同一套 manifest、加载器和播放器。
 
-终端用户流程：打开控制台的“素材包”页，选择 zip、确认本地使用授权、导入并启用；同名包需要显式勾选替换。导入会校验 manifest、每个 clip 的帧结构与 SHA-256（manifest 提供时逐 clip 核对并写入新摘要）、裁剪、热区和预设引用。失败时保留原素材，成功后桌宠立即切换，无需重启。也可以删除未启用的素材包或切回内置鲸鱼。导入、替换和预览在 UI 线程同步执行，大包会短暂卡顿。
+终端用户流程：打开控制台的“素材包”页，选择 zip 并导入；只有同名素材包已存在时才询问是否替换。导入会校验 manifest、每个 clip 的帧结构与 SHA-256（manifest 提供时逐 clip 核对并写入新摘要）、裁剪、热区和交互引用。失败时保留原素材，成功后桌宠立即切换，无需重启。也可以删除未启用的素材包；内置鲸鱼只读，只能启用和预览。导入和预览在 UI 线程同步执行，大包会短暂卡顿。
 
 开发工具流程：
 
 ```sh
 go run ./cmd/petpack -zip naiwa.zip
-go run ./cmd/petpack -check <数据目录>/packs/naiwa -strict
+go run ./cmd/petpack -check <数据目录>/packs/naiwa
 ```
 
-默认自动选择最近使用的数据目录（`Lucia Dev`、`lucia` 或打包版 `Lucia`），也可以显式传 `-app`。数据目录跟随应用名：`go tool mygo dev` 是 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 是 `lucia`，打包版是 `Lucia`。**不要在 Lucia 运行时同时执行开发工具导入**：CLI 导入前先退出应用，或改用控制台。`-force` 覆盖同名包，`-activate=false` 只导入不切换。`-check <dir> -strict` 读取磁盘原始 manifest，要求显式 schema 2、hotzones 和 presets。素材包缺失或损坏时应用会回退内置鲸鱼，并清除失效的 active 选择。
+默认自动选择最近使用的数据目录（`Lucia Dev`、`lucia` 或打包版 `Lucia`），也可以显式传 `-app`。数据目录跟随应用名：`go tool mygo dev` 是 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 是 `lucia`，打包版是 `Lucia`。**不要在 Lucia 运行时同时执行开发工具导入**：CLI 导入前先退出应用，或改用控制台。`-force` 覆盖同名包，`-activate=false` 只导入不切换。`-check <dir>` 校验当前 manifest 与全部 clip。素材包缺失或损坏时应用会回退内置包，并清除失效的 active 选择。
 
-schema 2 在旧字段之上增加 `hotzones`、`presets` 和动作级 `timing`；schema 1 仍可读取，并在内存中升级为 schema 2 默认值。完整字段与示例见 [桌宠规格](docs/specs/desktop-pet.md#schema-2-热区预设与时序) 和 [示例 manifest](docs/examples/pet-pack.schema2.json)。
+manifest 只有 `schema: 1`，不再保留版本分支。热区、交互、菜单、状态、事件、气泡和 motion 都由包声明；完整字段与示例见 [桌宠规格](docs/specs/desktop-pet.md#素材包-manifest) 和 [示例 manifest](docs/examples/pet-pack.json)。
 
-授权由用户本地确认；导入器在 manifest 中写入 `license.status = "local-only"`，不主张再分发权。
+授权不再作为导入门槛；`license` 只在列表和预览中展示，不主张再分发权。
 
 ## 打包
 
@@ -83,9 +83,10 @@ gh secret set MYGO_UPDATER_PRIVATE_KEY < ~/.config/lucia/update-keys/mygo-update
 | `internal/settings/` | 设置读写。 |
 | `internal/apppaths/` | 各平台用户目录解析。 |
 | `internal/diagnostics/` | 文件日志与轮转。 |
-| `internal/pet/` | 桌宠模型、内置静态素材、外部动画外观、布局、点击反应、气泡台词与透明视图。 |
-| `internal/petpack/` | 外部动画素材包：WebP/ANMF 解码、schema 1/2、热区/预设/时序、Store、lockfile、裁剪、帧源与 zip 导入。 |
-| `cmd/petpack/` | 开发用动画素材导入与 `-check` 校验工具；不随桌面应用分发。 |
-| `internal/pet/assets/deepseek-whale/` | 内置桌宠立绘与授权说明；美术素材按 CC BY-NC-SA 4.0 的条件使用，授权链未完全核实，仅限非商业使用。 |
+| `internal/pet/` | 桌宠模型、动画播放状态机、布局、交互、气泡与透明视图。 |
+| `internal/petpack/` | 素材包合同：WebP/ANMF 解码、单一 schema、校验、Store、lockfile、裁剪、帧源与 zip 安装。 |
+| `internal/builtinpack/` | 内嵌鲸鱼包、4 帧 WebP、源 PNG、生成脚本与授权说明。 |
+| `internal/brand/` | 应用品牌资源，包括从鲸鱼素材派生的托盘图标及其授权说明。 |
+| `cmd/petpack/` | 开发用素材包导入与 `-check` 校验工具；不随桌面应用分发。 |
 | `resources/` | 图标与随包分发的第三方声明。 |
 | `design/` | 图标 SVG 源文件。 |
