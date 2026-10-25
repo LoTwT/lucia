@@ -126,17 +126,21 @@ func TestInteractionWakesForNextFrame(t *testing.T) {
 
 func TestAnimatedMotionFollowsDeclaration(t *testing.T) {
 	now := time.Now()
-	_, squash, lift := animatedMotion(false, 0, "none", "squash", now.Add(-tapDuration/2), now)
-	if squash <= 0 || lift != 0 {
-		t.Fatalf("squash = %v, lift = %v, want squash only", squash, lift)
+	_, bounce := animatedMotion(false, 0, "none", "bounce", now.Add(-bounceDuration/2), now)
+	if bounce >= 0 {
+		t.Fatalf("bounce lift = %v, want an upward lift", bounce)
 	}
-	_, squash, lift = animatedMotion(false, 0, "none", "lift", now.Add(-headPatDuration/2), now)
-	if squash <= 0 || lift >= 0 {
-		t.Fatalf("squash = %v, lift = %v, want squash and an upward lift", squash, lift)
+	_, legacy := animatedMotion(false, 0, "none", "squash", now.Add(-bounceDuration/2), now)
+	if legacy != bounce {
+		t.Fatalf("legacy squash lift = %v, want the bounce lift %v", legacy, bounce)
 	}
-	bob, squash, lift := animatedMotion(true, bobPeriod/4, "bob", "squash", now, now)
-	if bob != 0 || squash != 0 || lift != 0 {
-		t.Fatalf("reduce-motion transforms = (%v, %v, %v), want zeros", bob, squash, lift)
+	_, pat := animatedMotion(false, 0, "none", "lift", now.Add(-headPatDuration/2), now)
+	if pat >= 0 || math.Abs(float64(pat)) >= math.Abs(float64(bounce)) {
+		t.Fatalf("pat lift = %v, want a gentler upward lift than bounce %v", pat, bounce)
+	}
+	bob, lift := animatedMotion(true, bobPeriod/4, "bob", "bounce", now, now)
+	if bob != 0 || lift != 0 {
+		t.Fatalf("reduce-motion transforms = (%v, %v), want zeros", bob, lift)
 	}
 }
 
@@ -147,7 +151,7 @@ func TestBuiltinPackDeclaresNoHostIntro(t *testing.T) {
 	}
 }
 
-func TestTapAmount(t *testing.T) {
+func TestPulse(t *testing.T) {
 	tests := []struct {
 		name    string
 		elapsed time.Duration
@@ -155,26 +159,15 @@ func TestTapAmount(t *testing.T) {
 	}{
 		{name: "before", elapsed: -time.Millisecond, want: 0},
 		{name: "start", elapsed: 0, want: 0},
-		{name: "peak", elapsed: tapDuration / 2, want: 1},
-		{name: "finished", elapsed: tapDuration, want: 0},
+		{name: "peak", elapsed: bounceDuration / 2, want: 1},
+		{name: "finished", elapsed: bounceDuration, want: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tapAmount(tt.elapsed); math.Abs(float64(got-tt.want)) > 0.0001 {
-				t.Fatalf("tapAmount(%v) = %v, want %v", tt.elapsed, got, tt.want)
+			if got := pulse(tt.elapsed, bounceDuration); math.Abs(float64(got-tt.want)) > 0.0001 {
+				t.Fatalf("pulse(%v, %v) = %v, want %v", tt.elapsed, bounceDuration, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestHeadPatAmountIsGentler(t *testing.T) {
-	face := tapAmount(tapDuration / 2)
-	pat := headPatAmount(headPatDuration / 2)
-	if pat <= 0 || pat >= face {
-		t.Fatalf("head pat peak = %v, want a positive value below face peak %v", pat, face)
-	}
-	if got := headPatAmount(headPatDuration); got != 0 {
-		t.Fatalf("headPatAmount after duration = %v, want 0", got)
 	}
 }
 
@@ -199,8 +192,8 @@ func TestClickFaceStartsInteraction(t *testing.T) {
 	face := zones[0]
 	tt.ClickAt(face.Rect.X+face.Rect.W/2, face.Rect.Y+face.Rect.H/2)
 	tt.Frame()
-	if m.interactionID != "poke" || m.interactionMotion != "squash" {
-		t.Fatalf("interaction = %q/%q, want poke/squash", m.interactionID, m.interactionMotion)
+	if m.interactionID != "poke" || m.interactionMotion != "bounce" {
+		t.Fatalf("interaction = %q/%q, want poke/bounce", m.interactionID, m.interactionMotion)
 	}
 }
 

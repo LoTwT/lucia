@@ -19,7 +19,7 @@ func TestUIPackSummaryMapsInteractionData(t *testing.T) {
 			},
 		}},
 		InteractionList: []petpack.InteractionDetail{{
-			ID: "poke", Label: "摸摸脸", Bubble: "face", Motion: "squash",
+			ID: "poke", Label: "摸摸脸", Bubble: "face", Motion: "bounce",
 			Steps: []petpack.Step{{Action: "laugh", DelayMs: 80}},
 		}},
 		ActionList: []petpack.ActionDetail{{

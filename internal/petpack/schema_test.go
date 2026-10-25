@@ -227,7 +227,7 @@ func validTestManifest() Manifest {
 			{ID: "face", Label: "脸", Rect: NormalizedRect{X: 0.2, Y: 0.2, Width: 0.4, Height: 0.4}, Interaction: "poke"},
 		},
 		Interactions: map[string]Interaction{
-			"poke": {Label: "摸摸脸", Steps: []Step{{Action: "laugh"}}, Bubble: "face", Motion: "squash"},
+			"poke": {Label: "摸摸脸", Steps: []Step{{Action: "laugh"}}, Bubble: "face", Motion: "bounce"},
 			"pat":  {Label: "摸摸头", Bubble: "pat", Motion: "lift", ReducedPoster: "idle_loop#1"},
 		},
 		Bubbles: map[string][]string{

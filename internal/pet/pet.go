@@ -16,10 +16,15 @@ const (
 	// moving the window, which would fight the OS drag.
 	bobPeriod    = 3200 * time.Millisecond
 	bobAmplitude = 2.5
-	// tapDuration is the squash-and-recover reaction to a click.
-	tapDuration = 450 * time.Millisecond
+	// bounceDuration is the quick upward reaction to a click.
+	bounceDuration = 360 * time.Millisecond
 	// headPatDuration is the gentler, longer reaction to the menu action.
-	headPatDuration = 620 * time.Millisecond
+	headPatDuration = 520 * time.Millisecond
+	// Both interaction motions are vertical-only. Scaling the whole sprite
+	// reads as squashing the artwork and fights packs that already animate
+	// the same interaction.
+	bounceAmplitude  = 4
+	headPatAmplitude = 3
 	// The pet gets drowsy and then falls asleep after this much time since
 	// the last interaction. The view clock decides the state; no timer runs.
 	drowsyAfter = 60 * time.Second
@@ -280,7 +285,7 @@ func (m *Model) View(c *ui.Context) {
 	idle := now.Sub(m.lastInteraction)
 	activity := m.activity(now)
 	reduceMotion := c.Preferences().ReduceMotion
-	bob, squash, lift := animatedMotion(reduceMotion, elapsed,
+	bob, interactionLift := animatedMotion(reduceMotion, elapsed,
 		m.animated.pack.Manifest.IdleMotion, m.interactionMotion, m.interactionAt, now)
 	m.animated.sync(now, activity, idle, m.dragging, reduceMotion)
 
@@ -336,12 +341,8 @@ func (m *Model) View(c *ui.Context) {
 			)).
 				Size(float32(m.spriteWidth), float32(m.spriteHeight)).
 				Fit(ui.Contain).
-				Label("Lucia 桌宠").
-				TransformOrigin(0.5, 1)
-			if squash > 0 {
-				image.Scale(1+squash*0.5, 1-squash)
-			}
-			image.Translate(0, bob+lift)
+				Label("Lucia 桌宠")
+			image.Translate(0, bob+interactionLift)
 		})
 		if m.animated.hotzonesClickable(m.dragging) {
 			for _, zone := range m.Hotzones() {
@@ -361,39 +362,30 @@ func (m *Model) View(c *ui.Context) {
 	}
 }
 
-func animatedMotion(reduceMotion bool, elapsed time.Duration, idleMotion, interactionMotion string, interactionAt, now time.Time) (bob, squash, lift float32) {
+func animatedMotion(reduceMotion bool, elapsed time.Duration, idleMotion, interactionMotion string, interactionAt, now time.Time) (bob, lift float32) {
 	if reduceMotion {
-		return 0, 0, 0
+		return 0, 0
 	}
 	if idleMotion == "bob" {
 		bob = float32(math.Sin(2*math.Pi*float64(elapsed)/float64(bobPeriod))) * bobAmplitude
 	}
 	motionElapsed := now.Sub(interactionAt)
 	switch interactionMotion {
-	case "squash":
-		squash = tapAmount(motionElapsed)
+	case "bounce", "squash":
+		// "squash" is a legacy name kept for packs authored before the
+		// motion stopped scaling the sprite.
+		lift = -bounceAmplitude * pulse(motionElapsed, bounceDuration)
 	case "lift":
-		squash = headPatAmount(motionElapsed)
-		lift = -3 * squash
+		lift = -headPatAmplitude * pulse(motionElapsed, headPatDuration)
 	}
-	return bob, squash, lift
+	return bob, lift
 }
 
-// tapAmount returns 0 outside the reaction and a 0→1→0 squash inside it.
-func tapAmount(elapsed time.Duration) float32 {
-	if elapsed < 0 || elapsed >= tapDuration {
+// pulse returns 0 outside the reaction and a 0→1→0 envelope inside it.
+func pulse(elapsed, duration time.Duration) float32 {
+	if elapsed < 0 || elapsed >= duration {
 		return 0
 	}
-	p := float32(elapsed) / float32(tapDuration)
+	p := float32(elapsed) / float32(duration)
 	return float32(math.Sin(math.Pi * float64(p)))
-}
-
-// headPatAmount is a gentler squash with a small lift, so the two reactions
-// read differently without another sprite frame.
-func headPatAmount(elapsed time.Duration) float32 {
-	if elapsed < 0 || elapsed >= headPatDuration {
-		return 0
-	}
-	p := float32(elapsed) / float32(headPatDuration)
-	return float32(math.Sin(math.Pi*float64(p))) * 0.65
 }

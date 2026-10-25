@@ -112,7 +112,7 @@ type Step struct {
 }
 
 // Interaction is one authored response. Steps may be empty when the pack only
-// supplies host feedback such as a bubble or a squash/lift motion.
+// supplies host feedback such as a bubble or a bounce/lift motion.
 type Interaction struct {
 	Label         string `json:"label,omitempty"`
 	Steps         []Step `json:"steps,omitempty"`
@@ -518,7 +518,9 @@ func validateManifest(id string, manifest Manifest) error {
 			return fmt.Errorf("petpack %q: invalid interaction id %q", id, interactionID)
 		}
 		switch interaction.Motion {
-		case "", "none", "squash", "lift":
+		// "squash" is accepted as a legacy alias for "bounce" so packs
+		// authored against the earlier motion name keep importing.
+		case "", "none", "bounce", "squash", "lift":
 		default:
 			return fmt.Errorf("petpack %q interaction %q: invalid motion %q", id, interactionID, interaction.Motion)
 		}

@@ -360,7 +360,7 @@ func (a *animatedModel) requestInteraction(interactionID string) bool {
 	}
 	steps := append([]petpack.Step(nil), interaction.Steps...)
 	if len(steps) == 0 {
-		// Feedback-only interactions (bubble, sound, squash/lift) do not
+		// Feedback-only interactions (bubble, sound, bounce/lift) do not
 		// interrupt a running clip. The host still plays them immediately.
 		return true
 	}

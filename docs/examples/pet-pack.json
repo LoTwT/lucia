@@ -79,15 +79,13 @@
       "label": "摸摸脸",
       "steps": [{ "action": "laugh" }],
       "bubble": "face",
-      "sound": true,
-      "motion": "squash"
+      "sound": true
     },
     "pat": {
       "label": "摸摸头",
       "steps": [{ "action": "happy" }],
       "bubble": "pat",
-      "sound": true,
-      "motion": "lift"
+      "sound": true
     }
   },
   "bubbles": {

@@ -31,7 +31,7 @@ func testPack(active bool) PackSummary {
 			X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5,
 		}},
 		InteractionList: []PackInteraction{{
-			ID: "poke", Label: "摸摸脸", Bubble: "face", Motion: "squash",
+			ID: "poke", Label: "摸摸脸", Bubble: "face", Motion: "bounce",
 			Steps: []PackInteractionStep{{Action: "laugh"}},
 		}},
 		ActionList: []PackAction{{

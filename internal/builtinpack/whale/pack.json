@@ -57,7 +57,7 @@
       "label": "摸摸脸",
       "bubble": "face",
       "sound": true,
-      "motion": "squash",
+      "motion": "bounce",
       "reducedPoster": "idle_loop#2"
     },
     "pat": {
