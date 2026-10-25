@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,100 @@ func TestStoreImportListActivateDelete(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Fatalf("list after delete = %+v", list)
+	}
+}
+
+func TestStoreDeleteKeepsTrashWhenCleanupFails(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires Unix directory permissions")
+	}
+	data := t.TempDir()
+	zipPath := writeStoreZip(t, data, true)
+	store := NewStore(data, "")
+	if _, err := store.Install(zipPath, false); err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(data, "packs", "tiny", "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "file"), []byte("locked"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		entries, _ := os.ReadDir(filepath.Join(data, "packs"))
+		for _, entry := range entries {
+			_ = os.Chmod(filepath.Join(data, "packs", entry.Name(), "locked"), 0o755)
+		}
+	})
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Delete("tiny"); err != nil {
+		t.Fatalf("Delete reported a failure after the pack was renamed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(data, "packs", "tiny")); !os.IsNotExist(err) {
+		t.Fatalf("deleted pack still exists: %v", err)
+	}
+	trashes, err := filepath.Glob(filepath.Join(data, "packs", ".trash-tiny-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trashes) != 1 {
+		t.Fatalf("trash directories = %v, want one retained for Recover", trashes)
+	}
+	list, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("list after delete = %+v", list)
+	}
+	if err := os.Chmod(filepath.Join(trashes[0], "locked"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(trashes[0]); !os.IsNotExist(err) {
+		t.Fatalf("Recover did not remove the trash directory: %v", err)
+	}
+}
+
+func TestStoreDeleteSucceedsWhenLockWriteFails(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires Unix directory permissions")
+	}
+	data := t.TempDir()
+	zipPath := writeStoreZip(t, data, true)
+	store := NewStore(data, "")
+	if _, err := store.Install(zipPath, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(data, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(data, 0o755) })
+
+	if err := store.Delete("tiny"); err != nil {
+		t.Fatalf("Delete reported a failure after the pack was renamed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(data, "packs", "tiny")); !os.IsNotExist(err) {
+		t.Fatalf("deleted pack still exists: %v", err)
+	}
+	if err := os.Chmod(data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	list, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("stale lock entry survived Recover: %+v", list)
 	}
 }
 

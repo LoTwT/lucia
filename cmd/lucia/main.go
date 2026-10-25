@@ -292,12 +292,24 @@ func main() {
 		UpdateSource:  "LoTwT/lucia",
 	})
 
-	syncPetVisible := func(visible bool) {
+	syncPetVisible := func(visible bool) bool {
+		if !model.SetPetVisible(visible) {
+			// The tray changed the window before the preference was
+			// written. Restore the persisted visibility so the window,
+			// console, and settings file do not disagree.
+			if !quitting && petWin != nil && petWin.IsVisible() != prefs.PetVisible {
+				petWin.SetVisible(prefs.PetVisible)
+			}
+			if win != nil && !win.IsDestroyed() {
+				win.Update(func() {})
+			}
+			return false
+		}
 		prefs.PetVisible = visible
-		model.SetPetVisible(visible)
 		if win != nil && !win.IsDestroyed() {
 			win.Update(func() {})
 		}
+		return true
 	}
 	showWindow := func() {
 		if win == nil || win.IsDestroyed() {
@@ -322,10 +334,12 @@ func main() {
 		if petWin == nil {
 			return
 		}
+		if !syncPetVisible(true) {
+			return
+		}
 		bubbleWin.Hide()
 		petWin.ResetPosition()
 		petModel.TriggerEvent("reset")
-		syncPetVisible(true)
 	}
 
 	configurePetModel := func(m *pet.Model) {
