@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	stddraw "image/draw"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -152,30 +153,36 @@ type Pack struct {
 
 // Load reads and validates a pack below root/packs/<id>.
 func Load(root, id string, displayScale float64) (*Pack, error) {
-	return loadPackDir(filepath.Join(root, "packs", id), id, displayScale)
+	return LoadDir(filepath.Join(root, "packs", id), id, displayScale)
 }
 
 // LoadDir validates a pack from an explicit directory. It is used by the
 // management store and the check command.
 func LoadDir(dir, id string, displayScale float64) (*Pack, error) {
-	return loadPackDir(dir, id, displayScale)
+	return loadPackFS(os.DirFS(dir), id, displayScale, dir)
+}
+
+// LoadFS validates a pack from any filesystem. The built-in pack uses an
+// embedded FS; installed packs use os.DirFS.
+func LoadFS(fsys fs.FS, id string, displayScale float64) (*Pack, error) {
+	return loadPackFS(fsys, id, displayScale, "")
 }
 
 // ReadManifest parses and validates only the manifest. Management listing
 // uses it so a broken clip does not make an otherwise visible pack vanish.
 func ReadManifest(dir, id string) (Manifest, error) {
+	return ReadManifestFS(os.DirFS(dir), id)
+}
+
+// ReadManifestFS parses and validates only the manifest from a filesystem.
+func ReadManifestFS(fsys fs.FS, id string) (Manifest, error) {
 	if !validPackDirID(id) {
 		return Manifest{}, fmt.Errorf("petpack: invalid pack id %q", id)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "pack.json"))
+	manifest, err := readManifestFS(fsys, id)
 	if err != nil {
-		return Manifest{}, fmt.Errorf("petpack %q: read manifest: %w", id, err)
+		return Manifest{}, err
 	}
-	var manifest Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return Manifest{}, fmt.Errorf("petpack %q: parse manifest: %w", id, err)
-	}
-	normalizeManifest(&manifest)
 	if err := validateManifest(id, manifest); err != nil {
 		return Manifest{}, err
 	}
@@ -189,7 +196,20 @@ func ReadRawManifest(dir, id string) (Manifest, error) {
 	if !validPackDirID(id) {
 		return Manifest{}, fmt.Errorf("petpack: invalid pack id %q", id)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "pack.json"))
+	return readRawManifestFS(os.DirFS(dir), id)
+}
+
+func readManifestFS(fsys fs.FS, id string) (Manifest, error) {
+	manifest, err := readRawManifestFS(fsys, id)
+	if err != nil {
+		return Manifest{}, err
+	}
+	normalizeManifest(&manifest)
+	return manifest, nil
+}
+
+func readRawManifestFS(fsys fs.FS, id string) (Manifest, error) {
+	data, err := fs.ReadFile(fsys, "pack.json")
 	if err != nil {
 		return Manifest{}, fmt.Errorf("petpack %q: read manifest: %w", id, err)
 	}
@@ -200,22 +220,17 @@ func ReadRawManifest(dir, id string) (Manifest, error) {
 	return manifest, nil
 }
 
-// loadPackDir validates a pack from its final directory. Import uses it after
+// loadPackFS validates a pack from its final filesystem. Import uses it after
 // installing the new directory, without assuming the parent directory is
 // named "packs".
-func loadPackDir(dir, id string, displayScale float64) (*Pack, error) {
+func loadPackFS(fsys fs.FS, id string, displayScale float64, dir string) (*Pack, error) {
 	if !validPackDirID(id) {
 		return nil, fmt.Errorf("petpack: invalid pack id %q", id)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "pack.json"))
+	manifest, err := readManifestFS(fsys, id)
 	if err != nil {
-		return nil, fmt.Errorf("petpack %q: read manifest: %w", id, err)
+		return nil, err
 	}
-	var manifest Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("petpack %q: parse manifest: %w", id, err)
-	}
-	normalizeManifest(&manifest)
 	if err := validateManifest(id, manifest); err != nil {
 		return nil, err
 	}
@@ -236,11 +251,10 @@ func loadPackDir(dir, id string, displayScale float64) (*Pack, error) {
 		if entry.File == "" {
 			return nil, fmt.Errorf("petpack %q clip %q: empty file", id, clipID)
 		}
-		path, err := packPath(dir, entry.File)
-		if err != nil {
+		if err := validPackFilePath(entry.File); err != nil {
 			return nil, fmt.Errorf("petpack %q clip %q: %w", id, clipID, err)
 		}
-		clip, err := OpenClip(clipID, path)
+		clip, err := OpenClipFS(clipID, fsys, entry.File)
 		if err != nil {
 			return nil, fmt.Errorf("petpack %q clip %q: %w", id, clipID, err)
 		}
@@ -560,13 +574,11 @@ func windowsReservedPackID(id string) bool {
 	return false
 }
 
-func packPath(dir, name string) (string, error) {
-	path := filepath.Join(dir, filepath.FromSlash(name))
-	rel, err := filepath.Rel(dir, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("path %q escapes the pack directory", name)
+func validPackFilePath(name string) error {
+	if name == "" || !fs.ValidPath(name) {
+		return fmt.Errorf("invalid clip path %q", name)
 	}
-	return path, nil
+	return nil
 }
 
 // cacheSize fits the crop into the desired sprite box at one uniform scale.

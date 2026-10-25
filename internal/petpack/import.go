@@ -280,7 +280,7 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	}
 	// The deferred cleanup now finds nothing at tmp; final is validated below.
 	stage("validating")
-	pack, err := loadPackDir(final, opts.ID, 1)
+	pack, err := LoadDir(final, opts.ID, 1)
 	if err != nil {
 		if rollbackErr := restore(); rollbackErr != nil {
 			return nil, fmt.Errorf("petpack import: validate installed pack: %w; rollback failed: %v", err, rollbackErr)

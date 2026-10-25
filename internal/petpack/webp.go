@@ -11,7 +11,9 @@ import (
 	"image"
 	stddraw "image/draw"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
 	xdraw "golang.org/x/image/draw"
@@ -55,15 +57,28 @@ type Clip struct {
 	Crop          image.Rectangle
 	Loop          bool
 
-	path      string
+	fsys      fs.FS
+	name      string
 	data      []byte
 	digest    [sha256.Size]byte
 	hasDigest bool
 }
 
-// OpenClip reads and parses one animated WebP file.
+// OpenClip reads and parses one animated WebP file from disk.
 func OpenClip(id, path string) (*Clip, error) {
-	data, err := os.ReadFile(path)
+	return OpenClipFS(id, os.DirFS(filepath.Dir(path)), filepath.Base(path))
+}
+
+// OpenClipFS reads and parses one animated WebP file from a filesystem. The
+// same loader serves installed packs and the embedded built-in pack.
+func OpenClipFS(id string, fsys fs.FS, name string) (*Clip, error) {
+	if fsys == nil {
+		return nil, fmt.Errorf("petpack %q: nil filesystem", id)
+	}
+	if !fs.ValidPath(name) {
+		return nil, fmt.Errorf("petpack %q: invalid clip path %q", id, name)
+	}
+	data, err := fs.ReadFile(fsys, name)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +86,8 @@ func OpenClip(id, path string) (*Clip, error) {
 	if err != nil {
 		return nil, err
 	}
-	clip.path = path
+	clip.fsys = fsys
+	clip.name = name
 	return clip, nil
 }
 
@@ -252,11 +268,11 @@ func (c *Clip) NewDecoder() (*Decoder, error) {
 	}
 	data := c.data
 	if data == nil {
-		if c.path == "" {
+		if c.fsys == nil || c.name == "" {
 			return nil, fmt.Errorf("petpack %q: no backing file", c.ID)
 		}
 		var err error
-		data, err = os.ReadFile(c.path)
+		data, err = fs.ReadFile(c.fsys, c.name)
 		if err != nil {
 			return nil, fmt.Errorf("petpack %q: read clip: %w", c.ID, err)
 		}

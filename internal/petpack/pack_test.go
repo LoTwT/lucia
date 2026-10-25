@@ -263,6 +263,24 @@ func TestCacheSizePreservesCropAspect(t *testing.T) {
 	}
 }
 
+func TestLoadFSUsesTheGivenFilesystem(t *testing.T) {
+	dir := writeTinyPack(t)
+	packDir := filepath.Join(dir, "packs", "tiny")
+	pack, err := LoadFS(os.DirFS(packDir), "tiny", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := pack.Clip("idle_loop"); !ok {
+		t.Fatal("LoadFS did not load idle_loop")
+	}
+	if _, err := ReadManifestFS(os.DirFS(packDir), "tiny"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadManifestFS(os.DirFS(dir), "tiny"); err == nil {
+		t.Fatal("ReadManifestFS found a manifest outside the pack filesystem")
+	}
+}
+
 func TestClipDetectsFileReplacedAfterLoad(t *testing.T) {
 	dir := writeTinyPack(t)
 	pack, err := Load(dir, "tiny", 2)
@@ -270,7 +288,8 @@ func TestClipDetectsFileReplacedAfterLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	clip := pack.Clips["idle_loop"]
-	if err := os.WriteFile(clip.path, []byte("different bytes"), 0o644); err != nil {
+	clipPath := filepath.Join(dir, "packs", "tiny", filepath.FromSlash(clip.name))
+	if err := os.WriteFile(clipPath, []byte("different bytes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := clip.NewDecoder(); err == nil || !strings.Contains(err.Error(), "changed on disk") {
