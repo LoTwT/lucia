@@ -133,7 +133,7 @@
 
 ## 导入与控制台
 
-- 控制台与 `cmd/petpack` 共用导入器。zip 中任意层级最浅的 `pack.json` 或 `pack.meta.json` 提供 id、名称、几何、动作、状态、事件、热区、交互和菜单；缺失时从 zip 文件名推导 id 并生成显式 actions/states/events/menu，不生成热区或交互。
+- 控制台与 `cmd/petpack` 共用导入器。zip 中任意层级最浅的 `pack.json` 或 `pack.meta.json` 提供 id、名称、几何、动作、状态、事件、热区、交互和菜单；缺失时从 zip 文件名推导 id 并生成显式 actions/states/events/menu，不生成热区或交互。`states.idle` 缺失时只补缺失的 `idle/drag/drowsy/asleep` 字段，不覆盖作者已声明的状态。
 - 导入只接受 `.webp`，丢弃 MP4 预览；限制 manifest 4 MiB、单文件 64 MiB、解压总量 512 MiB，防止 zip-slip 与 zip 炸弹；先写临时目录，旧包备份后安装新包并校验，失败时回滚。
 - `Store.Install(zip, replace)` 在 id 已存在且 `replace=false` 时返回 `*PackExistsError`，此时磁盘没有任何写入。控制台收到后弹出原生替换确认，确认后再以 `replace=true` 重试；取消无副作用。
 - 导入不再要求授权勾选，`license` 仅展示。同名冲突才出现替换确认。

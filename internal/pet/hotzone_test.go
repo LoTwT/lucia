@@ -124,6 +124,28 @@ func TestHotzonesClickStartsInteractionSequence(t *testing.T) {
 	}
 }
 
+func TestOverlappingHotzonesUseLaterDeclaration(t *testing.T) {
+	m, pack := newInteractionModel(t)
+	face := pack.Manifest.Hotzones[0].Rect
+	pack.Manifest.Hotzones[1].Rect = face
+	m.Close()
+	m, err := NewAnimated(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, _ := pack.Clip("idle_loop")
+	m.animated.cacheIdle(idle)
+	width, height := m.WindowSize()
+	tt := ui.NewTester(m.View, width, height)
+	tt.Frame()
+	zones := m.Hotzones()
+	tt.ClickAt(zones[0].Rect.X+zones[0].Rect.W/2, zones[0].Rect.Y+zones[0].Rect.H/2)
+	tt.Frame()
+	if m.interactionID != "pat" {
+		t.Fatalf("overlap interaction = %q, want the later pat hotzone", m.interactionID)
+	}
+}
+
 func TestInteractionSequenceWaitsForDelay(t *testing.T) {
 	m, _ := newInteractionModel(t)
 	width, height := m.WindowSize()

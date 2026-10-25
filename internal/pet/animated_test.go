@@ -188,6 +188,16 @@ func TestTriggerEventUsesManifestMapping(t *testing.T) {
 	}
 }
 
+func TestEnteringSleepClearsPendingSequence(t *testing.T) {
+	m, _ := newTinyAnimatedModel(t)
+	m.animated.sequence = []petpack.Step{{Action: "happy"}}
+	m.animated.sequenceIndex = 0
+	m.animated.enterAsleep(time.Now())
+	if len(m.animated.sequence) != 0 || m.animated.sequenceIndex != 0 {
+		t.Fatalf("sequence = %+v index=%d, want cleared", m.animated.sequence, m.animated.sequenceIndex)
+	}
+}
+
 func TestLoopingAsleepKeepsAdvancing(t *testing.T) {
 	m, pack := newTinyAnimatedModel(t)
 	pack.Manifest.Actions["asleep_loop"] = petpack.Action{

@@ -198,7 +198,17 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	}
 	states := baseManifest.States
 	if states.Idle == "" {
-		states = buildStates(actions)
+		generated := buildStates(actions)
+		states.Idle = generated.Idle
+		if states.Drag == "" {
+			states.Drag = generated.Drag
+		}
+		if states.Drowsy == "" {
+			states.Drowsy = generated.Drowsy
+		}
+		if states.Asleep == "" {
+			states.Asleep = generated.Asleep
+		}
 	}
 	events := baseManifest.Events
 	menu := baseManifest.Menu

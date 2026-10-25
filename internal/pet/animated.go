@@ -620,6 +620,7 @@ func (a *animatedModel) enterAsleep(now time.Time) {
 		a.advance(now)
 		return
 	}
+	a.clearSequence()
 	if a.current != nil && a.current.provider != nil {
 		a.current.provider.Close()
 	}

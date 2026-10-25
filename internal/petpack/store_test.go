@@ -346,6 +346,23 @@ func TestStoreRecoverRemovesInterruptedDirectories(t *testing.T) {
 	}
 }
 
+func TestImportPreservesAuthoredPartialStates(t *testing.T) {
+	data := t.TempDir()
+	zipPath := writeZipWithManifest(t, data, "partial-states.zip", func(m *Manifest) {
+		m.States = States{Idle: "", Drowsy: "happy"}
+	})
+	pack, err := ImportZip(zipPath, filepath.Join(data, "out"), ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pack.Manifest.States.Idle != "idle" {
+		t.Fatalf("idle state = %q, want generated idle", pack.Manifest.States.Idle)
+	}
+	if pack.Manifest.States.Drowsy != "happy" {
+		t.Fatalf("drowsy state = %q, want the authored action", pack.Manifest.States.Drowsy)
+	}
+}
+
 func TestImportZipCarriesPackManifest(t *testing.T) {
 	data := t.TempDir()
 	zipPath := writeStoreZip(t, data, true)
