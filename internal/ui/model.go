@@ -16,6 +16,7 @@ import (
 // Pages of the main window, also used as sidebar item IDs.
 const (
 	PageOverview = "overview"
+	PagePacks    = "packs"
 	PageAbout    = "about"
 )
 
@@ -38,6 +39,14 @@ type Config struct {
 	// ApplyPetScale resizes the desktop pet after the preference changes.
 	// Nil keeps the preference only in tests or embedded hosts.
 	ApplyPetScale func(float64)
+	// ApplyTheme applies the application's light/dark appearance after the
+	// preference changes. Nil keeps the preference only in tests or embedded
+	// hosts.
+	ApplyTheme func(string)
+	// ApplyBubbleTheme reapplies the speech bubble appearance after the
+	// preference changes. Nil keeps the preference only in tests or embedded
+	// hosts.
+	ApplyBubbleTheme func(string)
 	// OpenAtLogin reports the login item state. Nil hides the control.
 	OpenAtLogin func() bool
 	// SetOpenAtLogin changes the login item. Nil hides the control.
@@ -47,6 +56,42 @@ type Config struct {
 	// OpenDataDir opens the data root in the system file manager. Nil hides
 	// the action.
 	OpenDataDir func() error
+	// LoadPacks lists installed asset packs. Nil hides the pack page
+	// controls that depend on it.
+	LoadPacks func() ([]PackSummary, error)
+	// ChoosePackZip asks the user for a pack zip and returns its path, or ""
+	// when canceled. Nil hides the import form unless ChoosePackZipAsync is
+	// set. Tests and embedded hosts can use this synchronous form.
+	ChoosePackZip func() (string, error)
+	// ChoosePackZipAsync is the UI-safe native dialog form. done must be called
+	// on the UI thread; the application wraps the native dialog in a goroutine
+	// and posts the result back through Window.Update.
+	ChoosePackZipAsync func(done func(path string, err error))
+	// InstallPack installs a zip synchronously. It returns PackExistsError
+	// when the id is already installed and replace is false. It must not
+	// activate the pack; the console calls ActivatePack after a successful
+	// install. Tests and embedded hosts can use this form.
+	InstallPack func(zipPath string, replace bool) (PackSummary, error)
+	// InstallPackAsync is the UI-safe form. It should run the install away
+	// from the UI thread and call done on the UI thread. When set, it takes
+	// precedence over InstallPack.
+	InstallPackAsync func(zipPath string, replace bool, done func(PackSummary, error))
+	// ConfirmReplacePackAsync asks before replacing an installed id. done must
+	// be called on the UI thread.
+	ConfirmReplacePackAsync func(id, name string, done func(bool))
+	// ActivatePack switches the running pet and persists petPack.
+	ActivatePack func(id string) error
+	// DeletePack removes an inactive pack.
+	DeletePack func(id string) error
+	// ConfirmDeletePack asks before deleting. Nil means no confirmation.
+	ConfirmDeletePack func(id, name string) bool
+	// ConfirmDeletePackAsync is the UI-safe native dialog form. done must be
+	// called on the UI thread.
+	ConfirmDeletePackAsync func(id, name string, done func(bool))
+	// LoadPackPreview returns a PNG poster for a pack.
+	LoadPackPreview func(id string) ([]byte, error)
+	// OpenPacksDir opens the install directory.
+	OpenPacksDir func() error
 	// RepositoryURL is the public repository opened from the About page.
 	RepositoryURL string
 	// UpdateSource names the release feed, such as "LoTwT/lucia".
@@ -69,18 +114,39 @@ type Model struct {
 	openAtLoginKnown bool
 	// bubbleChoice is the label selected in the bubble frequency control.
 	bubbleChoice string
+	// themeChoice is the label selected in the application theme control.
+	themeChoice string
+	// bubbleThemeChoice is the label selected in the bubble theme control.
+	bubbleThemeChoice string
 	// petScaleChoice is the label selected in the pet size control.
 	petScaleChoice string
+	// Pack management state. Packs are refreshed explicitly so the view
+	// never scans the filesystem on every frame.
+	packs          []PackSummary
+	packsLoaded    bool
+	packsErr       string
+	packSelected   string
+	packZip        string
+	packBusy       bool
+	packPreview    *ui.Bitmap
+	packPreviewID  string
+	packPreviewW   int
+	packPreviewH   int
+	packPreviewErr string
+	packActionErr  string
+	packNotice     string
 }
 
 // New creates the window model on the overview page.
 func New(cfg Config) *Model {
 	return &Model{
-		cfg:            cfg,
-		page:           PageOverview,
-		settings:       cfg.Settings,
-		bubbleChoice:   bubbleChoiceFor(cfg.Settings.BubbleCooldownSeconds),
-		petScaleChoice: petScaleChoiceFor(cfg.Settings.PetScale),
+		cfg:               cfg,
+		page:              PageOverview,
+		settings:          cfg.Settings,
+		themeChoice:       themeChoiceFor(cfg.Settings.Theme),
+		bubbleChoice:      bubbleChoiceFor(cfg.Settings.BubbleCooldownSeconds),
+		bubbleThemeChoice: bubbleThemeChoiceFor(cfg.Settings.BubbleTheme),
+		petScaleChoice:    petScaleChoiceFor(cfg.Settings.PetScale),
 	}
 }
 
@@ -100,6 +166,8 @@ func (m *Model) View(c *ui.Context) {
 			ui.Scroll(c).Grow(1).Padding(24, 32, 32).Gap(18).Children(func() {
 				ui.Column(c).MaxWidth(820).Gap(18).Children(func() {
 					switch m.page {
+					case PagePacks:
+						m.packsPage(c)
 					case PageAbout:
 						m.aboutPage(c)
 					default:
@@ -170,6 +238,7 @@ func (m *Model) sidebar(c *ui.Context) {
 		ui.Sidebar(c, &m.page, func() {
 			ui.SidebarSection(c, "应用", nil, func() {
 				ui.SidebarItem(c, PageOverview, petIcon, "桌宠")
+				ui.SidebarItem(c, PagePacks, packIcon, "素材包")
 				ui.SidebarItem(c, PageAbout, aboutIcon, "关于").Children(func() {
 					if phase := m.cfg.Updates.Snapshot().Phase; phase == updates.PhaseAvailable {
 						ui.Badge(c, "新")
@@ -210,6 +279,8 @@ func (m *Model) logoMark(c *ui.Context, size float32) {
 
 func (m *Model) pageHeading() (title, subtitle string) {
 	switch m.page {
+	case PagePacks:
+		return "素材包", "导入、预览与管理本地动画素材"
 	case PageAbout:
 		return "关于", "版本、更新与数据位置"
 	default:
@@ -277,6 +348,74 @@ func bubbleSeconds(choice string) int {
 	}
 }
 
+var themeChoices = []string{"跟随系统", "浅色", "深色"}
+
+func themeChoiceFor(theme string) string {
+	switch theme {
+	case settings.ThemeLight:
+		return themeChoices[1]
+	case settings.ThemeDark:
+		return themeChoices[2]
+	default:
+		return themeChoices[0]
+	}
+}
+
+func themeForChoice(choice string) string {
+	switch choice {
+	case "浅色":
+		return settings.ThemeLight
+	case "深色":
+		return settings.ThemeDark
+	default:
+		return settings.ThemeSystem
+	}
+}
+
+var bubbleThemeChoices = []string{"跟随应用", "浅色", "深色"}
+
+func bubbleThemeChoiceFor(theme string) string {
+	switch theme {
+	case settings.BubbleThemeLight:
+		return bubbleThemeChoices[1]
+	case settings.BubbleThemeDark:
+		return bubbleThemeChoices[2]
+	default:
+		return bubbleThemeChoices[0]
+	}
+}
+
+func bubbleThemeForChoice(choice string) string {
+	switch choice {
+	case "浅色":
+		return settings.BubbleThemeLight
+	case "深色":
+		return settings.BubbleThemeDark
+	default:
+		return settings.BubbleThemeApp
+	}
+}
+
+// bubbleThemeHint states the result of the bubble preference instead of
+// making the user infer what "follow the app" means in the current theme.
+func bubbleThemeHint(theme, bubbleTheme string) string {
+	switch bubbleTheme {
+	case settings.BubbleThemeLight:
+		return "固定为浅色，不受应用主题影响。"
+	case settings.BubbleThemeDark:
+		return "固定为深色，不受应用主题影响。"
+	default:
+		switch theme {
+		case settings.ThemeLight:
+			return "跟随上方的主题模式；当前为浅色。"
+		case settings.ThemeDark:
+			return "跟随上方的主题模式；当前为深色。"
+		default:
+			return "跟随上方的主题模式；当前随系统切换。"
+		}
+	}
+}
+
 // SetPetVisible keeps the console's copy in sync when the tray toggles the
 // pet. It also persists the new state.
 func (m *Model) SetPetVisible(visible bool) {
@@ -289,87 +428,138 @@ func (m *Model) SetPetVisible(visible bool) {
 
 func (m *Model) petCard(c *ui.Context) {
 	t := c.Theme()
-	panel(c, "", func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "显示桌宠").FontSize(14)
-				ui.Text(c, "隐藏后可从托盘重新显示；重启后保持当前选择。").FontSize(12).
-					TextColor(t.TextMuted)
-			})
-			ui.Switch(c, &m.settings.PetVisible).Label("显示桌宠").OnChange(func() {
-				m.saveSettings()
-				if m.cfg.ApplyPetVisible != nil {
-					m.cfg.ApplyPetVisible(m.settings.PetVisible)
-				}
-			})
-		})
-
-		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "桌宠大小").FontSize(14)
-				ui.Text(c, "同时缩放窗口、立绘和脸部互动区域。").FontSize(12).
-					TextColor(t.TextMuted)
-			})
-			if ui.Select(c, &m.petScaleChoice, petScaleChoices).Label("桌宠大小").Width(170).Changed() {
-				m.settings.PetScale = petScaleForChoice(m.petScaleChoice)
-				m.saveSettings()
-				if m.cfg.ApplyPetScale != nil {
-					m.cfg.ApplyPetScale(m.settings.PetScale)
-				}
-			}
-		})
-
-		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "互动音效").FontSize(14)
-				ui.Text(c, "摸脸和摸摸头时播放一小段提示音。").FontSize(12).
-					TextColor(t.TextMuted)
-			})
-			ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(m.saveSettings)
-		})
-
-		ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-			ui.Column(c).Gap(2).Grow(1).Children(func() {
-				ui.Text(c, "气泡频率").FontSize(14)
-				ui.Text(c, "限制两次台词气泡之间的最短间隔；关闭后只保留动作和音效。").FontSize(12).
-					TextColor(t.TextMuted)
-			})
-			if ui.Select(c, &m.bubbleChoice, bubbleChoices).Label("气泡频率").Width(170).Changed() {
-				m.settings.BubbleCooldownSeconds = bubbleSeconds(m.bubbleChoice)
-				m.saveSettings()
-			}
-		})
-
-		if m.cfg.OpenAtLogin != nil && m.cfg.SetOpenAtLogin != nil {
-			if !m.openAtLoginKnown {
-				m.openAtLogin = m.cfg.OpenAtLogin()
-				m.openAtLoginKnown = true
-			}
+	ui.Column(c).Gap(16).Children(func() {
+		settingsGroup(c, "显示", func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
 				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					ui.Text(c, "开机自启").FontSize(14)
-					ui.Text(c, "登录系统后自动启动 Lucia 和桌宠。").FontSize(12).TextColor(t.TextMuted)
-				})
-				ui.Switch(c, &m.openAtLogin).Label("开机自启").OnChange(func() {
-					m.setOpenAtLogin(m.openAtLogin)
-				})
-			})
-		}
-
-		if m.cfg.ResetPetPosition != nil {
-			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
-				ui.Column(c).Gap(2).Grow(1).Children(func() {
-					ui.Text(c, "桌宠位置").FontSize(14)
-					ui.Text(c, "移回主屏右下角；隐藏时会重新显示。").FontSize(12).
+					ui.Text(c, "主题模式").FontSize(14)
+					ui.Text(c, "控制 Lucia 窗口与控件的明暗外观。").FontSize(12).
 						TextColor(t.TextMuted)
 				})
-				if ui.Button(c, "重置").Clicked() {
-					m.settings.PetVisible = true
+				if ui.Select(c, &m.themeChoice, themeChoices).Label("主题模式").Width(170).Changed() {
+					m.settings.Theme = themeForChoice(m.themeChoice)
 					m.saveSettings()
-					m.cfg.ResetPetPosition()
+					if m.cfg.ApplyTheme != nil {
+						m.cfg.ApplyTheme(m.settings.Theme)
+					}
+				}
+			})
+
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "显示桌宠").FontSize(14)
+					ui.Text(c, "隐藏后可从托盘重新显示；重启后保持当前选择。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				ui.Switch(c, &m.settings.PetVisible).Label("显示桌宠").OnChange(func() {
+					m.saveSettings()
+					if m.cfg.ApplyPetVisible != nil {
+						m.cfg.ApplyPetVisible(m.settings.PetVisible)
+					}
+				})
+			})
+
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "桌宠大小").FontSize(14)
+					ui.Text(c, "同时缩放窗口、立绘和脸部互动区域。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				if ui.Select(c, &m.petScaleChoice, petScaleChoices).Label("桌宠大小").Width(170).Changed() {
+					m.settings.PetScale = petScaleForChoice(m.petScaleChoice)
+					m.saveSettings()
+					if m.cfg.ApplyPetScale != nil {
+						m.cfg.ApplyPetScale(m.settings.PetScale)
+					}
+				}
+			})
+		})
+
+		settingsGroup(c, "气泡", func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "气泡主题").FontSize(14)
+					ui.Text(c, bubbleThemeHint(m.settings.Theme, m.settings.BubbleTheme)).FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				if ui.Select(c, &m.bubbleThemeChoice, bubbleThemeChoices).Label("气泡主题").Width(170).Changed() {
+					m.settings.BubbleTheme = bubbleThemeForChoice(m.bubbleThemeChoice)
+					m.saveSettings()
+					if m.cfg.ApplyBubbleTheme != nil {
+						m.cfg.ApplyBubbleTheme(m.settings.BubbleTheme)
+					}
+				}
+			})
+
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "气泡频率").FontSize(14)
+					ui.Text(c, "限制两次台词气泡之间的最短间隔；关闭后只保留动作和音效。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				if ui.Select(c, &m.bubbleChoice, bubbleChoices).Label("气泡频率").Width(170).Changed() {
+					m.settings.BubbleCooldownSeconds = bubbleSeconds(m.bubbleChoice)
+					m.saveSettings()
+				}
+			})
+		})
+
+		settingsGroup(c, "互动", func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+				ui.Column(c).Gap(2).Grow(1).Children(func() {
+					ui.Text(c, "互动音效").FontSize(14)
+					ui.Text(c, "摸脸和摸摸头时播放一小段提示音。").FontSize(12).
+						TextColor(t.TextMuted)
+				})
+				ui.Switch(c, &m.settings.SoundEnabled).Label("互动音效").OnChange(m.saveSettings)
+			})
+		})
+
+		if (m.cfg.OpenAtLogin != nil && m.cfg.SetOpenAtLogin != nil) || m.cfg.ResetPetPosition != nil {
+			settingsGroup(c, "系统", func() {
+				if m.cfg.OpenAtLogin != nil && m.cfg.SetOpenAtLogin != nil {
+					if !m.openAtLoginKnown {
+						m.openAtLogin = m.cfg.OpenAtLogin()
+						m.openAtLoginKnown = true
+					}
+					ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+						ui.Column(c).Gap(2).Grow(1).Children(func() {
+							ui.Text(c, "开机自启").FontSize(14)
+							ui.Text(c, "登录系统后自动启动 Lucia 和桌宠。").FontSize(12).TextColor(t.TextMuted)
+						})
+						ui.Switch(c, &m.openAtLogin).Label("开机自启").OnChange(func() {
+							m.setOpenAtLogin(m.openAtLogin)
+						})
+					})
+				}
+
+				if m.cfg.ResetPetPosition != nil {
+					ui.Row(c).AlignItems(ui.Center).Gap(14).Children(func() {
+						ui.Column(c).Gap(2).Grow(1).Children(func() {
+							ui.Text(c, "桌宠位置").FontSize(14)
+							ui.Text(c, "移回主屏右下角；隐藏时会重新显示。").FontSize(12).
+								TextColor(t.TextMuted)
+						})
+						if ui.Button(c, "重置").Clicked() {
+							m.settings.PetVisible = true
+							m.saveSettings()
+							m.cfg.ResetPetPosition()
+						}
+					})
 				}
 			})
 		}
+	})
+}
+
+// settingsGroup puts the section heading outside its card so the page reads
+// as a series of independent settings groups rather than one long form.
+func settingsGroup(c *ui.Context, title string, body func()) {
+	t := c.Theme()
+	ui.Column(c).Gap(5).Children(func() {
+		ui.Text(c, title).FontSize(13).Bold().TextColor(t.TextMuted)
+		ui.Column(c).Padding(10, 16).Gap(11).Radius(10).
+			Background(t.Background).Border(1, t.Border).Children(body)
 	})
 }
 

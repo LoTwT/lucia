@@ -30,6 +30,7 @@ func newTinyPack(t *testing.T) *petpack.Pack {
 	for _, id := range []string{
 		"idle_loop", "happy_enter", "happy_exit", "laugh_enter", "laugh_exit",
 		"grab_enter", "drag_loop", "drop_exit", "belly_taunt", "sleep_denial",
+		"wave", "think", "sad",
 	} {
 		clips[id] = petpack.ClipEntry{File: "clips/tiny.webp", Frames: 3, Loop: id == "idle_loop" || id == "drag_loop"}
 	}
@@ -39,21 +40,20 @@ func newTinyPack(t *testing.T) *petpack.Pack {
 		Canvas:       petpack.Size{Width: 16, Height: 16},
 		Crop:         petpack.Rect{Width: 16, Height: 16},
 		Base:         petpack.Base{Window: petpack.Size{Width: 20, Height: 20}, Sprite: petpack.Size{Width: 16, Height: 16}},
-		Face:         petpack.Face{X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5},
 		BubbleAnchor: petpack.Anchor{X: 0.5, Y: 0.1},
 		Clips:        clips,
 		Actions: map[string]petpack.Action{
 			"idle": {
-				Loop: "idle_loop", Poster: "idle_loop#0", FaceClickable: true, LoopCount: -1,
+				Label: "待机", Loop: "idle_loop", Poster: "idle_loop#0", Interruptible: true, LoopCount: -1,
 			},
 			"happy": {
-				Enter: "happy_enter", Exit: "happy_exit", Poster: "happy_enter#0", FaceClickable: true,
+				Label: "开心", Enter: "happy_enter", Exit: "happy_exit", Poster: "happy_enter#0", Interruptible: true,
 			},
 			"laugh": {
-				Enter: "laugh_enter", Exit: "laugh_exit", Poster: "laugh_enter#0", FaceClickable: true,
+				Label: "大笑", Enter: "laugh_enter", Exit: "laugh_exit", Poster: "laugh_enter#0", Interruptible: true,
 			},
 			"drag": {
-				Enter: "grab_enter", Loop: "drag_loop", Exit: "drop_exit", Poster: "drag_loop#0", LoopCount: -1,
+				Label: "拖动", Enter: "grab_enter", Loop: "drag_loop", Exit: "drop_exit", Poster: "drag_loop#0", LoopCount: -1,
 			},
 			"belly_taunt": {
 				Label: "肚肚挑衅", Once: "belly_taunt", Poster: "belly_taunt#0",
@@ -61,7 +61,26 @@ func newTinyPack(t *testing.T) *petpack.Pack {
 			"sleep_denial": {
 				Label: "困到点头", Once: "sleep_denial", Poster: "sleep_denial#0",
 			},
+			"wave":  {Label: "挥手", Once: "wave", Poster: "wave#0"},
+			"think": {Label: "思考", Once: "think", Poster: "think#0"},
+			"sad":   {Label: "难过", Once: "sad", Poster: "sad#0"},
 		},
+		States: petpack.States{Idle: "idle", Drag: "drag", Drowsy: "sleep_denial"},
+		Events: petpack.Events{
+			Intro: "wave", Activate: "wave", Reset: "wave",
+			UpdateChecking: "think", UpdateFailed: "sad",
+		},
+		Hotzones: []petpack.Hotzone{
+			{ID: "face", Label: "摸摸脸", Rect: petpack.NormalizedRect{X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5}, Interaction: "poke"},
+		},
+		Interactions: map[string]petpack.Interaction{
+			"poke": {
+				Label: "摸摸脸", Steps: []petpack.Step{{Action: "laugh"}},
+				Bubble: "face", Sound: true, Motion: "squash", ReducedPoster: "idle_loop#2",
+			},
+		},
+		Bubbles: map[string][]string{"face": {"别戳脸啦。"}},
+		Menu:    []petpack.MenuEntry{{Action: "belly_taunt"}},
 	}
 	body, err := json.Marshal(manifest)
 	if err != nil {
@@ -126,17 +145,17 @@ func TestAnimatedIdleProviderIsNilWhileCaching(t *testing.T) {
 	}
 }
 
-func TestAnimatedFaceReactionChainsToIdle(t *testing.T) {
+func TestAnimatedPokeChainsToIdle(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	width, height := m.WindowSize()
 	tt := ui.NewTester(m.View, width, height)
 	tt.Frame()
-	m.React(ReactionFace)
+	m.TriggerInteraction("poke")
 	tt.Frame()
 	if m.animated.current == nil || m.animated.current.actionID != "laugh" || m.animated.current.phase != phaseEnter {
 		t.Fatalf("current = %+v, want laugh/enter", m.animated.current)
 	}
-	if m.animated.faceClickable(false) != true {
+	if m.animated.hotzonesClickable(false) != true {
 		t.Fatal("laugh should keep the face clickable")
 	}
 	tt.Advance(150 * time.Millisecond)
@@ -151,6 +170,75 @@ func TestAnimatedFaceReactionChainsToIdle(t *testing.T) {
 	}
 }
 
+func TestTriggerEventUsesManifestMapping(t *testing.T) {
+	m, _ := newTinyAnimatedModel(t)
+	tt := ui.NewTester(m.View, 20, 20)
+	tt.Frame()
+	if !m.HasEvent("intro") || !m.HasEvent("update.checking") {
+		t.Fatal("expected pack events are missing")
+	}
+	m.TriggerEvent("update.checking")
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "think" {
+		t.Fatalf("current = %+v, want think", m.animated.current)
+	}
+	m.TriggerEvent("missing")
+	if m.animated.pendingOnce != "" {
+		t.Fatalf("unknown event queued %q", m.animated.pendingOnce)
+	}
+}
+
+func TestEnteringSleepClearsPendingSequence(t *testing.T) {
+	m, _ := newTinyAnimatedModel(t)
+	m.animated.sequence = []petpack.Step{{Action: "happy"}}
+	m.animated.sequenceIndex = 0
+	m.animated.enterAsleep(time.Now())
+	if len(m.animated.sequence) != 0 || m.animated.sequenceIndex != 0 {
+		t.Fatalf("sequence = %+v index=%d, want cleared", m.animated.sequence, m.animated.sequenceIndex)
+	}
+}
+
+func TestLoopingAsleepKeepsAdvancing(t *testing.T) {
+	m, pack := newTinyAnimatedModel(t)
+	pack.Manifest.Actions["asleep_loop"] = petpack.Action{
+		Label: "睡着", Loop: "idle_loop", Poster: "idle_loop#0", LoopCount: -1,
+	}
+	pack.Manifest.States.Asleep = "asleep_loop"
+	width, height := m.WindowSize()
+	tt := ui.NewTester(m.View, width, height)
+	tt.Frame()
+	tt.Advance(asleepAfter)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "asleep_loop" {
+		t.Fatalf("current = %+v, want the looping asleep action", m.animated.current)
+	}
+	tt.Advance(50 * time.Millisecond)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.frame != 1 {
+		t.Fatalf("current = %+v, want asleep frame 1", m.animated.current)
+	}
+}
+
+func TestFiniteDrowsyReturnsToIdle(t *testing.T) {
+	m, _ := newTinyAnimatedModel(t)
+	width, height := m.WindowSize()
+	tt := ui.NewTester(m.View, width, height)
+	tt.Frame()
+	tt.Advance(drowsyAfter)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "sleep_denial" {
+		t.Fatalf("current = %+v, want the finite drowsy action", m.animated.current)
+	}
+	tt.Advance(500 * time.Millisecond)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "idle" {
+		t.Fatalf("current = %+v, want idle after the finite drowsy action", m.animated.current)
+	}
+	if m.animated.restPoster != nil {
+		t.Fatal("finite drowsy action left a static poster")
+	}
+}
+
 func TestAnimatedDragChain(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	width, height := m.WindowSize()
@@ -161,7 +249,7 @@ func TestAnimatedDragChain(t *testing.T) {
 	if m.animated.current == nil || m.animated.current.actionID != "drag" || m.animated.current.phase != phaseEnter {
 		t.Fatalf("current = %+v, want drag/enter", m.animated.current)
 	}
-	if m.animated.faceClickable(true) {
+	if m.animated.hotzonesClickable(true) {
 		t.Fatal("drag must disable the face target")
 	}
 	tt.Advance(150 * time.Millisecond)
@@ -216,7 +304,7 @@ func TestAnimatedSpecialMenu(t *testing.T) {
 	if m.animated.current == nil || m.animated.current.actionID != "belly_taunt" {
 		t.Fatalf("current = %+v, want belly_taunt", m.animated.current)
 	}
-	if m.animated.faceClickable(false) {
+	if m.animated.hotzonesClickable(false) {
 		t.Fatal("specials must disable the face target")
 	}
 	provider, ok := m.animated.current.provider.(*decoderProvider)
@@ -252,7 +340,7 @@ func TestAnimatedSpecialWakesFromSleep(t *testing.T) {
 }
 
 func TestAnimatedQueuesActionBehindIntro(t *testing.T) {
-	a := &animatedModel{}
+	a := &animatedModel{pack: newTinyPack(t)}
 	a.requestAction("wave")
 	a.requestAction("think")
 	a.requestAction("think")
@@ -267,7 +355,7 @@ func TestAnimatedQueuesActionBehindIntro(t *testing.T) {
 func TestAnimatedBackgroundActionDoesNotWakeSleepingPet(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	m.animated.asleep = true
-	m.PlayBackgroundAction("think")
+	m.TriggerBackgroundEvent("update.checking")
 	if m.animated.pendingOnce != "" {
 		t.Fatalf("pendingOnce = %q, want empty while asleep", m.animated.pendingOnce)
 	}
@@ -286,7 +374,7 @@ func (failingProvider) Failed() bool                  { return true }
 func (failingProvider) Reset()                        {}
 func (failingProvider) Close()                        {}
 
-func TestAnimatedDecodeFailureStopsScheduling(t *testing.T) {
+func TestAnimatedDecodeFailureSchedulesRecovery(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	now := time.Now()
 	m.animated.current = &clipPlay{
@@ -295,8 +383,8 @@ func TestAnimatedDecodeFailureStopsScheduling(t *testing.T) {
 		provider:   failingProvider{},
 		frameStart: now,
 	}
-	if delay := m.animated.nextDelay(now, ActivityAwake, 0, time.Time{}, false); delay != 0 {
-		t.Fatalf("nextDelay = %v, want 0 after a decode failure", delay)
+	if delay := m.animated.nextDelay(now, ActivityAwake, 0, time.Time{}, false); delay <= 0 {
+		t.Fatalf("nextDelay = %v, want a positive delay so sync can recover", delay)
 	}
 	m.animated.advance(now)
 	if m.animated.current == nil || m.animated.current.actionID != "idle" {
@@ -308,13 +396,31 @@ func TestAnimatedDragEndAfterLongGapStillDrops(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	a := m.animated
 	now := time.Now()
-	a.sync(now, ActivityAwake, 0, false, ReactionNone, time.Time{}, false)
+	a.sync(now, ActivityAwake, 0, false, false)
 	a.requestDragStart()
-	a.sync(now.Add(50*time.Millisecond), ActivityAwake, 0, true, ReactionNone, time.Time{}, false)
+	a.sync(now.Add(50*time.Millisecond), ActivityAwake, 0, true, false)
 	a.requestDragEnd()
-	a.sync(now.Add(2*time.Second), ActivityAwake, 0, false, ReactionNone, time.Time{}, false)
+	a.sync(now.Add(2*time.Second), ActivityAwake, 0, false, false)
 	if a.current == nil || a.current.actionID != "drag" || a.current.phase != phaseExit {
 		t.Fatalf("current = %+v, want drag exit after the gap", a.current)
+	}
+}
+
+func TestIdleMotionBobKeepsTheAnimationClockRunning(t *testing.T) {
+	m, pack := newTinyAnimatedModel(t)
+	pack.Manifest.IdleMotion = "bob"
+	now := time.Now()
+	if delay := m.animated.nextDelay(now, ActivityAwake, 0, time.Time{}, false); delay <= 0 || delay > idleFrameInterval {
+		t.Fatalf("awake bob delay = %v, want 1..%v", delay, idleFrameInterval)
+	}
+	if delay := m.animated.nextDelay(now, ActivityDrowsy, drowsyAfter, time.Time{}, false); delay <= 0 || delay > drowsyFrameInterval {
+		t.Fatalf("drowsy bob delay = %v, want 1..%v", delay, drowsyFrameInterval)
+	}
+	if delay := m.animated.nextDelay(now, ActivityAsleep, asleepAfter, time.Time{}, false); delay != asleepFrameInterval {
+		t.Fatalf("asleep bob delay = %v, want %v", delay, asleepFrameInterval)
+	}
+	if delay := m.animated.nextDelay(now, ActivityAwake, 0, now, false); delay != activeFrameInterval {
+		t.Fatalf("interaction bob delay = %v, want %v", delay, activeFrameInterval)
 	}
 }
 
@@ -327,7 +433,7 @@ func TestAnimatedReduceMotionUsesPoster(t *testing.T) {
 	if m.animated.current != nil {
 		t.Fatalf("current = %+v, want nil in Reduce Motion", m.animated.current)
 	}
-	m.React(ReactionFace)
+	m.TriggerInteraction("poke")
 	tt.Frame()
 	if m.animated.current != nil {
 		t.Fatalf("current = %+v, want nil in Reduce Motion", m.animated.current)

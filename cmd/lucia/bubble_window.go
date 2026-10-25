@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/LoTwT/lucia/internal/pet"
+	"github.com/LoTwT/lucia/internal/settings"
 	"github.com/egoist/mygo"
 	mgui "github.com/egoist/mygo/ui"
 )
@@ -16,7 +17,6 @@ import (
 type bubbleWindow struct {
 	win        *mygo.Window
 	model      *pet.BubbleModel
-	seq        int
 	hideTimer  *time.Timer
 	generation atomic.Int64
 }
@@ -47,6 +47,40 @@ func newBubbleWindow(quitting func() bool) *bubbleWindow {
 	return b
 }
 
+// SetTheme applies the console's bubble appearance preference. It also
+// repaints a visible bubble so a theme change takes effect immediately.
+func (b *bubbleWindow) SetTheme(theme pet.BubbleTheme) {
+	if b == nil || b.model == nil {
+		return
+	}
+	b.model.SetTheme(theme)
+	if b.win != nil && !b.win.IsDestroyed() {
+		b.win.Update(func() {})
+	}
+}
+
+func themeSourceForPreference(value string) mygo.ThemeSource {
+	switch value {
+	case settings.ThemeLight:
+		return mygo.ThemeLight
+	case settings.ThemeDark:
+		return mygo.ThemeDark
+	default:
+		return mygo.ThemeSystem
+	}
+}
+
+func bubbleThemeForPreference(value string) pet.BubbleTheme {
+	switch value {
+	case settings.BubbleThemeLight:
+		return pet.BubbleThemeLight
+	case settings.BubbleThemeDark:
+		return pet.BubbleThemeDark
+	default:
+		return pet.BubbleThemeApp
+	}
+}
+
 // handleClose keeps the bubble as a hide-on-close window during normal use,
 // but lets MyGo's quit sequence close it. Otherwise prepareQuit would cancel
 // the whole quit after the pet window had already been destroyed.
@@ -58,9 +92,8 @@ func (b *bubbleWindow) handleClose(e *mygo.CloseEvent, quitting func() bool) {
 	b.Hide()
 }
 
-// Show selects the next line for reaction, places the bubble relative to the
-// pet, and starts its lifetime.
-func (b *bubbleWindow) Show(reaction pet.Reaction, petRect pet.Rect, displays []pet.Display) {
+// Show places one authored line relative to the pet and starts its lifetime.
+func (b *bubbleWindow) Show(text string, petRect pet.Rect, displays []pet.Display) {
 	if b == nil || b.win == nil || b.win.IsDestroyed() {
 		return
 	}
@@ -69,11 +102,9 @@ func (b *bubbleWindow) Show(reaction pet.Reaction, petRect pet.Rect, displays []
 	if runtime.GOOS == "linux" {
 		return
 	}
-	text := pet.BubbleLine(reaction, b.seq)
 	if text == "" {
 		return
 	}
-	b.seq++
 	// Invalidate the previous lifetime before showing the new line, so an
 	// old timer cannot hide the new bubble while it is being placed.
 	generation := b.generation.Add(1)
@@ -82,7 +113,7 @@ func (b *bubbleWindow) Show(reaction pet.Reaction, petRect pet.Rect, displays []
 		b.hideTimer = nil
 	}
 	placement := pet.PlaceBubble(petRect, displays)
-	b.model.SetContent(text, placement.Side, placement.TailX)
+	b.model.SetContent(text, placement.Side)
 	b.win.SetPosition(placement.X, placement.Y)
 	b.win.Update(func() {})
 	b.win.ShowInactive()

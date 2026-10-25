@@ -73,12 +73,16 @@ func TestOverviewShowsPetControls(t *testing.T) {
 	tt := ui.NewTester(model.View, 1000, 700)
 	for _, want := range []string{
 		"桌宠",
+		"主题模式",
+		"控制 Lucia 窗口与控件的明暗外观。",
 		"显示桌宠",
 		"隐藏后可从托盘重新显示；重启后保持当前选择。",
 		"桌宠大小",
 		"互动音效",
 		"摸脸和摸摸头时播放一小段提示音。",
 		"气泡频率",
+		"气泡主题",
+		"跟随上方的主题模式；当前随系统切换。",
 		"开机自启",
 		"桌宠位置",
 		"移回主屏右下角；隐藏时会重新显示。",
@@ -163,6 +167,91 @@ func TestBubbleChoiceMapping(t *testing.T) {
 		if got := bubbleSeconds(tt.choice); got != tt.seconds {
 			t.Errorf("bubbleSeconds(%q) = %d, want %d", tt.choice, got, tt.seconds)
 		}
+	}
+}
+
+func TestThemeChoiceMapping(t *testing.T) {
+	tests := []struct {
+		theme  string
+		choice string
+	}{
+		{theme: settings.ThemeSystem, choice: "跟随系统"},
+		{theme: settings.ThemeLight, choice: "浅色"},
+		{theme: settings.ThemeDark, choice: "深色"},
+	}
+	for _, tt := range tests {
+		if got := themeChoiceFor(tt.theme); got != tt.choice {
+			t.Errorf("themeChoiceFor(%q) = %q, want %q", tt.theme, got, tt.choice)
+		}
+		if got := themeForChoice(tt.choice); got != tt.theme {
+			t.Errorf("themeForChoice(%q) = %q, want %q", tt.choice, got, tt.theme)
+		}
+	}
+}
+
+func TestBubbleThemeChoiceMapping(t *testing.T) {
+	tests := []struct {
+		theme  string
+		choice string
+	}{
+		{theme: settings.BubbleThemeApp, choice: "跟随应用"},
+		{theme: settings.BubbleThemeLight, choice: "浅色"},
+		{theme: settings.BubbleThemeDark, choice: "深色"},
+	}
+	for _, tt := range tests {
+		if got := bubbleThemeChoiceFor(tt.theme); got != tt.choice {
+			t.Errorf("bubbleThemeChoiceFor(%q) = %q, want %q", tt.theme, got, tt.choice)
+		}
+		if got := bubbleThemeForChoice(tt.choice); got != tt.theme {
+			t.Errorf("bubbleThemeForChoice(%q) = %q, want %q", tt.choice, got, tt.theme)
+		}
+	}
+}
+
+func TestBubbleThemeHint(t *testing.T) {
+	tests := []struct {
+		name        string
+		theme       string
+		bubbleTheme string
+		want        string
+	}{
+		{
+			name:        "app follows system",
+			theme:       settings.ThemeSystem,
+			bubbleTheme: settings.BubbleThemeApp,
+			want:        "跟随上方的主题模式；当前随系统切换。",
+		},
+		{
+			name:        "app is light",
+			theme:       settings.ThemeLight,
+			bubbleTheme: settings.BubbleThemeApp,
+			want:        "跟随上方的主题模式；当前为浅色。",
+		},
+		{
+			name:        "app is dark",
+			theme:       settings.ThemeDark,
+			bubbleTheme: settings.BubbleThemeApp,
+			want:        "跟随上方的主题模式；当前为深色。",
+		},
+		{
+			name:        "fixed light",
+			theme:       settings.ThemeDark,
+			bubbleTheme: settings.BubbleThemeLight,
+			want:        "固定为浅色，不受应用主题影响。",
+		},
+		{
+			name:        "fixed dark",
+			theme:       settings.ThemeLight,
+			bubbleTheme: settings.BubbleThemeDark,
+			want:        "固定为深色，不受应用主题影响。",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bubbleThemeHint(tt.theme, tt.bubbleTheme); got != tt.want {
+				t.Fatalf("bubbleThemeHint(%q, %q) = %q, want %q", tt.theme, tt.bubbleTheme, got, tt.want)
+			}
+		})
 	}
 }
 

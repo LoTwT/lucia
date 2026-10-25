@@ -6,13 +6,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
 	"github.com/LoTwT/lucia/internal/apppaths"
+	"github.com/LoTwT/lucia/internal/brand"
 	"github.com/LoTwT/lucia/internal/buildinfo"
+	"github.com/LoTwT/lucia/internal/builtinpack"
 	"github.com/LoTwT/lucia/internal/diagnostics"
 	"github.com/LoTwT/lucia/internal/pet"
 	"github.com/LoTwT/lucia/internal/petpack"
@@ -78,17 +81,51 @@ func main() {
 		log.Printf("lucia: settings: %v (using defaults)", err)
 	}
 	log.Printf("lucia: settings: check updates on launch=%v", prefs.CheckUpdatesOnLaunch)
+	mygo.Theme.SetSource(themeSourceForPreference(prefs.Theme))
+	settingsStore := settings.NewStore(paths.Data, prefs)
+	if petpack.IsReservedPackID(prefs.PetPack) {
+		updated, updateErr := settingsStore.Update(func(s *settings.Settings) { s.PetPack = "" })
+		if updateErr != nil {
+			log.Printf("lucia: normalize reserved pack id: %v", updateErr)
+		} else {
+			prefs = updated
+		}
+	}
+	packStore := petpack.NewStore(paths.Data, prefs.PetPack)
+	if err := packStore.Recover(); err != nil {
+		log.Printf("lucia: recover packs: %v", err)
+	}
+	if err := packStore.SetActive(prefs.PetPack); err != nil {
+		log.Printf("lucia: record active pack: %v", err)
+	}
 
 	manager := updates.New(updates.MyGo{}, info.Version)
 	manager.SetAutoCheck(prefs.CheckUpdatesOnLaunch)
 
-	petModel, err := newPetModel(paths.Data, prefs.PetPack)
+	builtinPetPack, err := builtinpack.Load(2)
+	if err != nil {
+		log.Fatalf("lucia: built-in pack: %v", err)
+	}
+	petModel, fellBack, err := newPetModel(paths.Data, prefs.PetPack, builtinPetPack)
 	if err != nil {
 		log.Fatalf("lucia: pet assets: %v", err)
 	}
+	if fellBack {
+		log.Printf("lucia: pet pack %q failed to load; clearing the active selection", prefs.PetPack)
+		if err := clearFallbackActive(settingsStore, packStore, &prefs); err != nil {
+			log.Printf("lucia: clear active pack: %v", err)
+		}
+	}
 	petModel.SetScale(prefs.PetScale)
-	prefs.PetScale = petModel.Scale()
-	playIntro := prefs.PetVisible && petModel.Animated() && !prefs.PetIntroPlayed
+	if scale := petModel.Scale(); scale != prefs.PetScale {
+		updated, err := settingsStore.Update(func(s *settings.Settings) { s.PetScale = scale })
+		if err != nil {
+			log.Printf("lucia: normalize pet scale: %v", err)
+		} else {
+			prefs = updated
+		}
+	}
+	playIntro := prefs.PetVisible && petModel.HasEvent("intro") && !prefs.PetIntroPlayed
 
 	var (
 		win        *mygo.Window
@@ -100,16 +137,18 @@ func main() {
 		lastPhase  updates.Phase
 	)
 	petSound := newPetSound()
+	var activatePetPack func(string) error
 	model := appui.New(appui.Config{
 		Version:  info.Version,
 		DataDir:  paths.Data,
 		Updates:  manager,
-		Settings: prefs,
+		Settings: settingsStore.Snapshot(),
 		SaveSettings: func(s settings.Settings) error {
-			if err := settings.Save(paths.Data, s); err != nil {
+			updated, err := updateUISettings(settingsStore, s)
+			if err != nil {
 				return err
 			}
-			prefs = s
+			prefs = updated
 			return nil
 		},
 		ApplyPetVisible: func(visible bool) { petWin.SetVisible(visible) },
@@ -117,13 +156,138 @@ func main() {
 			bubbleWin.Hide()
 			petWin.ApplyScale(scale)
 		},
+		ApplyTheme: func(theme string) {
+			mygo.Theme.SetSource(themeSourceForPreference(theme))
+		},
+		ApplyBubbleTheme: func(theme string) {
+			if bubbleWin != nil {
+				bubbleWin.SetTheme(bubbleThemeForPreference(theme))
+			}
+		},
 		OpenAtLogin:    func() bool { return mygo.App.OpenAtLogin() },
 		SetOpenAtLogin: func(open bool) error { return mygo.App.SetOpenAtLogin(open) },
 		ResetPetPosition: func() {
 			bubbleWin.Hide()
 			petWin.ResetPosition()
 		},
-		OpenDataDir:   func() error { return mygo.Shell.OpenPath(paths.Data) },
+		OpenDataDir: func() error { return mygo.Shell.OpenPath(paths.Data) },
+		LoadPacks: func() ([]appui.PackSummary, error) {
+			list, err := packStore.List()
+			if err != nil {
+				return nil, err
+			}
+			out := make([]appui.PackSummary, 0, len(list)+1)
+			out = append(out, uiPackSummary(builtinpack.Summary(builtinPetPack, packStore.Active() == "")))
+			for _, summary := range list {
+				out = append(out, uiPackSummary(summary))
+			}
+			return out, nil
+		},
+		ChoosePackZipAsync: func(done func(string, error)) {
+			// Dialog.Open posts the native panel to the main loop and waits.
+			// Calling it on the UI thread would block that loop; keep the
+			// dialog in a goroutine and return the result through Update.
+			parent := win
+			go func() {
+				paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+					Parent:  parent,
+					Title:   "选择素材包",
+					Message: "选择包含透明动画 WebP 的 zip",
+					Filters: []mygo.FileFilter{{Name: "素材包", Extensions: []string{"zip"}}},
+				})
+				path := ""
+				if len(paths) > 0 {
+					path = paths[0]
+				}
+				if parent == nil || parent.IsDestroyed() {
+					return
+				}
+				parent.Update(func() { done(path, err) })
+			}()
+		},
+		InstallPackAsync: func(zipPath string, replace bool, done func(appui.PackSummary, error)) {
+			// Parsing clips and measuring crops is expensive; keep it off the
+			// UI thread, then hand the result back through Window.Update.
+			parent := win
+			go func() {
+				summary, err := packStore.Install(zipPath, replace)
+				if err != nil {
+					var exists *petpack.PackExistsError
+					if errors.As(err, &exists) {
+						err = &appui.PackExistsError{ID: exists.ID, Name: exists.Name}
+					}
+				}
+				if parent == nil || parent.IsDestroyed() {
+					return
+				}
+				if err != nil {
+					parent.Update(func() { done(appui.PackSummary{}, err) })
+					return
+				}
+				parent.Update(func() { done(uiPackSummary(summary), nil) })
+			}()
+		},
+		ConfirmReplacePackAsync: func(id, name string, done func(bool)) {
+			parent := win
+			go func() {
+				res, err := mygo.Dialog.Message(mygo.MessageOptions{
+					Parent:        parent,
+					Type:          mygo.MessageWarning,
+					Title:         "替换素材包",
+					Message:       fmt.Sprintf("替换已安装的“%s”（%s）？", name, id),
+					Detail:        "新版本会先完整校验，失败时回滚到旧版本。",
+					Buttons:       []string{"替换", "取消"},
+					DefaultButton: 1,
+					CancelButton:  1,
+				})
+				if parent == nil || parent.IsDestroyed() {
+					return
+				}
+				parent.Update(func() { done(err == nil && res.Button == 0) })
+			}()
+		},
+		ActivatePack: func(id string) error {
+			if activatePetPack == nil {
+				return fmt.Errorf("应用尚未就绪")
+			}
+			if petpack.IsReservedPackID(id) {
+				id = ""
+			}
+			return activatePetPack(id)
+		},
+		DeletePack: func(id string) error { return packStore.Delete(id) },
+		ConfirmDeletePackAsync: func(id, name string, done func(bool)) {
+			// Dialog.Message has the same main-loop contract as Open.
+			parent := win
+			go func() {
+				res, err := mygo.Dialog.Message(mygo.MessageOptions{
+					Parent:        parent,
+					Type:          mygo.MessageWarning,
+					Title:         "删除素材包",
+					Message:       fmt.Sprintf("删除“%s”（%s）？", name, id),
+					Detail:        "只会删除本机数据目录中的素材包，不会影响内置鲸鱼。",
+					Buttons:       []string{"删除", "取消"},
+					DefaultButton: 1,
+					CancelButton:  1,
+				})
+				if parent == nil || parent.IsDestroyed() {
+					return
+				}
+				parent.Update(func() { done(err == nil && res.Button == 0) })
+			}()
+		},
+		LoadPackPreview: func(id string) ([]byte, error) {
+			if petpack.IsReservedPackID(id) {
+				return builtinpack.Preview(builtinPetPack)
+			}
+			return packStore.Preview(id)
+		},
+		OpenPacksDir: func() error {
+			if err := os.MkdirAll(packStore.PacksDir(), 0o755); err != nil {
+				return err
+			}
+			return mygo.Shell.OpenPath(packStore.PacksDir())
+		},
 		RepositoryURL: repositoryURL,
 		UpdateSource:  "LoTwT/lucia",
 	})
@@ -160,8 +324,86 @@ func main() {
 		}
 		bubbleWin.Hide()
 		petWin.ResetPosition()
-		petModel.PlayAction("wave")
+		petModel.TriggerEvent("reset")
 		syncPetVisible(true)
+	}
+
+	configurePetModel := func(m *pet.Model) {
+		if m == nil {
+			return
+		}
+		m.SetMenuActions(pet.MenuActions{
+			OpenSettings: func() {
+				model.ShowOverview()
+				showWindow()
+			},
+			Hide:  togglePet,
+			Reset: resetPet,
+		})
+		m.SetBubbleHandler(func(event pet.BubbleEvent) {
+			if petWin == nil || !petWin.IsVisible() {
+				return
+			}
+			if prefs.SoundEnabled && event.Sound {
+				playPetSound(petSound)
+			}
+			if event.Text == "" {
+				return
+			}
+			now := time.Now()
+			if !bubbleAllowed(now, lastBubble, prefs.BubbleCooldownSeconds) {
+				return
+			}
+			lastBubble = now
+			bubbleWin.Show(event.Text, petWin.BubbleRect(), currentPetDisplays())
+		})
+	}
+	configurePetModel(petModel)
+
+	activatePetPack = func(id string) error {
+		var next *pet.Model
+		var err error
+		if id == "" {
+			next, err = pet.NewAnimated(builtinPetPack)
+		} else {
+			pack, loadErr := petpack.Load(paths.Data, id, 2)
+			if loadErr != nil {
+				return fmt.Errorf("加载素材包 %q：%w", id, loadErr)
+			}
+			next, err = pet.NewAnimated(pack)
+		}
+		if err != nil {
+			return fmt.Errorf("创建桌宠：%w", err)
+		}
+		next.SetScale(prefs.PetScale)
+		configurePetModel(next)
+		oldID := prefs.PetPack
+		if err := packStore.SetActive(id); err != nil {
+			next.Close()
+			return err
+		}
+		updated, err := settingsStore.Update(func(s *settings.Settings) {
+			s.PetPack = id
+		})
+		if err != nil {
+			next.Close()
+			_ = packStore.SetActive(oldID)
+			return err
+		}
+		prefs = updated
+		oldModel := petModel
+		petModel = next
+		if petWin != nil {
+			petWin.SetModel(next)
+		}
+		if oldModel != nil {
+			oldModel.Close()
+		}
+		if bubbleWin != nil {
+			bubbleWin.Hide()
+		}
+		next.TriggerEvent("activate")
+		return nil
 	}
 
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { quitting = true })
@@ -220,14 +462,18 @@ func main() {
 		petWin = newPetWindow(petModel, func() bool { return quitting }, prefs.PetVisible)
 		if playIntro {
 			petWin.SetOnFirstFrame(func() {
-				prefs.PetIntroPlayed = true
-				if err := settings.Save(paths.Data, prefs); err != nil {
+				if updated, err := settingsStore.Update(func(s *settings.Settings) {
+					s.PetIntroPlayed = true
+				}); err != nil {
 					log.Printf("lucia: save pet intro state: %v", err)
+				} else {
+					prefs = updated
 				}
 			})
-			petModel.PlayAction("wave")
+			petModel.TriggerEvent("intro")
 		}
 		bubbleWin = newBubbleWindow(func() bool { return quitting })
+		bubbleWin.SetTheme(bubbleThemeForPreference(prefs.BubbleTheme))
 		petWin.SetOnMove(func() { bubbleWin.Hide() })
 		petWin.SetOnHide(func() {
 			bubbleWin.Hide()
@@ -238,28 +484,6 @@ func main() {
 			bubbleWin.Hide()
 		})
 		petWin.SetOnDragEnd(func() { petModel.DragEnded() })
-		petModel.SetMenuActions(pet.MenuActions{
-			OpenSettings: func() {
-				model.ShowOverview()
-				showWindow()
-			},
-			Hide:  togglePet,
-			Reset: resetPet,
-		})
-		petModel.SetReactionHandler(func(reaction pet.Reaction) {
-			if petWin == nil || !petWin.IsVisible() {
-				return
-			}
-			if prefs.SoundEnabled {
-				playPetSound(petSound)
-			}
-			now := time.Now()
-			if !bubbleAllowed(now, lastBubble, prefs.BubbleCooldownSeconds) {
-				return
-			}
-			lastBubble = now
-			bubbleWin.Show(reaction, petWin.BubbleRect(), currentPetDisplays())
-		})
 
 		win = mygo.NewWindow(mygo.WindowOptions{
 			Title:     "Lucia",
@@ -282,7 +506,7 @@ func main() {
 		})
 
 		tray, err = mygo.NewTray(mygo.TrayOptions{
-			Icon:    pet.TrayIcon(),
+			Icon:    brand.TrayIcon(),
 			ToolTip: "Lucia 桌宠",
 			Menu: mygo.NewMenu([]*mygo.MenuItem{
 				{Label: "显示/隐藏宠物", Click: func(*mygo.MenuItem, *mygo.Window) { togglePet() }},
@@ -318,9 +542,9 @@ func main() {
 					}
 					switch snapshot.Phase {
 					case updates.PhaseChecking, updates.PhaseDownloading:
-						petModel.PlayBackgroundAction("think")
+						petModel.TriggerBackgroundEvent("update.checking")
 					case updates.PhaseFailed:
-						petModel.PlayBackgroundAction("sad")
+						petModel.TriggerBackgroundEvent("update.failed")
 					}
 				})
 			}
@@ -344,25 +568,67 @@ func main() {
 	log.Printf("lucia: exited")
 }
 
+// clearFallbackActive removes a selected pack after the startup load failed
+// and the built-in pet took over. Keeping it active would make the console
+// claim a pack is in use while the pet window shows the whale.
+func clearFallbackActive(settingsStore *settings.Store, packStore *petpack.Store, prefs *settings.Settings) error {
+	old := prefs.PetPack
+	if err := packStore.SetActive(""); err != nil {
+		return err
+	}
+	updated, err := settingsStore.Update(func(s *settings.Settings) {
+		s.PetPack = ""
+	})
+	if err != nil {
+		_ = packStore.SetActive(old)
+		return err
+	}
+	*prefs = updated
+	return nil
+}
+
+// updateUISettings merges the presentation fields owned by the console into
+// the process-wide settings store. Runtime-only fields such as petIntroPlayed
+// and petPack must survive a console save.
+func updateUISettings(store *settings.Store, next settings.Settings) (settings.Settings, error) {
+	return store.Update(func(cur *settings.Settings) {
+		cur.CheckUpdatesOnLaunch = next.CheckUpdatesOnLaunch
+		cur.PetVisible = next.PetVisible
+		cur.PetScale = next.PetScale
+		cur.SoundEnabled = next.SoundEnabled
+		cur.BubbleCooldownSeconds = next.BubbleCooldownSeconds
+		cur.Theme = next.Theme
+		cur.BubbleTheme = next.BubbleTheme
+	})
+}
+
 // newPetModel loads the configured external pack, falling back to the
 // embedded whale when the pack is missing or invalid. A broken optional pack
-// must never keep the app from starting.
-func newPetModel(dataDir, packID string) (*pet.Model, error) {
+// must never keep the app from starting. The bool reports that the requested
+// pack was replaced by the built-in one.
+func newPetModel(dataDir, packID string, builtin *petpack.Pack) (*pet.Model, bool, error) {
+	fellBack := false
 	if packID != "" {
 		pack, err := petpack.Load(dataDir, packID, 2)
 		if err != nil {
-			log.Printf("lucia: pet pack %q: %v (using the built-in pet)", packID, err)
+			log.Printf("lucia: pet pack %q: %v (using the built-in pack)", packID, err)
+			fellBack = true
 		} else {
 			model, err := pet.NewAnimated(pack)
 			if err != nil {
-				log.Printf("lucia: pet pack %q: %v (using the built-in pet)", packID, err)
+				log.Printf("lucia: pet pack %q: %v (using the built-in pack)", packID, err)
+				fellBack = true
 			} else {
 				log.Printf("lucia: pet pack %q loaded: %d clips", packID, len(pack.Clips))
-				return model, nil
+				return model, false, nil
 			}
 		}
 	}
-	return pet.New()
+	model, err := pet.NewAnimated(builtin)
+	if err != nil {
+		return nil, fellBack, err
+	}
+	return model, fellBack, nil
 }
 
 // selfTest reports the identity and updater state of the built artifact.
@@ -376,4 +642,8 @@ func selfTest() {
 		state = "enabled"
 	}
 	fmt.Fprintf(os.Stderr, "lucia: self-test: %s updates=%s\n", info.LogLine(), state)
+	if _, err := builtinpack.Load(1); err != nil {
+		fmt.Fprintf(os.Stderr, "lucia: self-test: built-in pack: %v\n", err)
+		os.Exit(1)
+	}
 }

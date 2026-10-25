@@ -2,9 +2,9 @@ package pet
 
 import (
 	"errors"
+	"fmt"
 	"image"
 	"log"
-	"sort"
 	"sync/atomic"
 	"time"
 
@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	animatedReduceMotionReaction = 1200 * time.Millisecond
+	animatedReduceMotionFeedback = 1200 * time.Millisecond
 	// animatedResetGap is longer than the longest authored frame (1083 ms)
 	// but short enough that a suspended window does not decode a long
 	// backlog of frames when it becomes visible again.
@@ -129,13 +129,8 @@ type clipPlay struct {
 	provider   frameProvider
 	frame      int
 	frameStart time.Time
+	holdUntil  time.Time
 	loops      int
-}
-
-// AnimatedAction is one manual action exposed by the pet's context menu.
-type AnimatedAction struct {
-	ID    string
-	Label string
 }
 
 type animatedModel struct {
@@ -147,32 +142,32 @@ type animatedModel struct {
 	idle        atomic.Pointer[cachedIdle]
 	idleFailed  atomic.Bool
 
-	current *clipPlay
+	current    *clipPlay
+	restPoster image.Image
 
-	pendingOnce     string
-	queuedOnce      []string
-	pendingReaction Reaction
-	pendingDrag     bool
-	pendingDrop     bool
-	dragActive      bool
+	sequence      []petpack.Step
+	sequenceIndex int
+	sequenceAt    time.Time
+
+	pendingOnce string
+	queuedOnce  []string
+	pendingDrag bool
+	pendingDrop bool
+	dragActive  bool
 
 	drowsyPlayed bool
 	asleep       bool
 	reduceMotion bool
 	lastView     time.Time
 
-	posters map[string]image.Image
+	posters        map[string]image.Image
+	reducedPosters map[string]image.Image
 }
 
 func newAnimatedModel(pack *petpack.Pack) (*animatedModel, error) {
-	idleAction, ok := pack.Action("idle")
+	idleAction, ok := pack.Action(pack.Manifest.States.Idle)
 	if !ok || idleAction.Loop == "" {
-		idleAction = petpack.Action{
-			Loop:          "idle_loop",
-			Poster:        "idle_loop#0",
-			FaceClickable: true,
-			LoopCount:     -1,
-		}
+		return nil, fmt.Errorf("pet pack has no idle action %q", pack.Manifest.States.Idle)
 	}
 	if idleAction.Poster == "" {
 		idleAction.Poster = idleAction.Loop + "#0"
@@ -186,10 +181,11 @@ func newAnimatedModel(pack *petpack.Pack) (*animatedModel, error) {
 		return nil, err
 	}
 	a := &animatedModel{
-		pack:       pack,
-		idleAction: idleAction,
-		poster:     poster,
-		posters:    map[string]image.Image{"idle": poster},
+		pack:           pack,
+		idleAction:     idleAction,
+		poster:         poster,
+		posters:        map[string]image.Image{pack.Manifest.States.Idle: poster},
+		reducedPosters: make(map[string]image.Image),
 	}
 	go a.cacheIdle(idleClip)
 	return a, nil
@@ -219,18 +215,16 @@ func NewAnimated(pack *petpack.Pack) (*Model, error) {
 			Height: pack.Manifest.Base.Sprite.Height,
 		},
 	}
-	layout.Face.X = pack.Manifest.Face.X
-	layout.Face.Y = pack.Manifest.Face.Y
-	layout.Face.Width = pack.Manifest.Face.Width
-	layout.Face.Height = pack.Manifest.Face.Height
 	m := &Model{
-		layout:        layout,
-		scale:         defaultScale,
-		bubbleAnchorX: pack.Manifest.BubbleAnchor.X,
-		bubbleAnchorY: pack.Manifest.BubbleAnchor.Y,
+		layout:         layout,
+		scale:          defaultScale,
+		hotzoneEntries: pack.HotzoneList(),
+		bubbleAnchorX:  pack.Manifest.BubbleAnchor.X,
+		bubbleAnchorY:  pack.Manifest.BubbleAnchor.Y,
 	}
 	if m.bubbleAnchorX == 0 && m.bubbleAnchorY == 0 {
 		m.bubbleAnchorX = 0.5
+		m.bubbleAnchorY = 0.05
 	}
 	m.applyLayout()
 	animated, err := newAnimatedModel(pack)
@@ -331,27 +325,88 @@ func (a *animatedModel) startIdle(now time.Time) {
 	if a.idleAction.Loop == "" {
 		return
 	}
-	if a.startSegment("idle", a.idleAction, phaseLoop, a.idleAction.Loop, now) {
+	if a.startSegment(a.idleActionID(), a.idleAction, phaseLoop, a.idleAction.Loop, now) {
 		a.asleep = false
 	}
 }
 
-func (a *animatedModel) requestReaction(reaction Reaction) {
-	if reaction == ReactionNone || a.reduceMotion {
+func (a *animatedModel) close() {
+	if a == nil {
 		return
 	}
-	a.pendingReaction = reaction
+	if a.current != nil && a.current.provider != nil {
+		a.current.provider.Close()
+	}
+	a.current = nil
+	a.clearSequence()
 	a.pendingOnce = ""
+	a.queuedOnce = nil
+	a.pendingDrag = false
+	a.pendingDrop = false
+	a.dragActive = false
+}
+
+func (a *animatedModel) idleActionID() string { return a.pack.Manifest.States.Idle }
+
+func (a *animatedModel) dragActionID() string { return a.pack.Manifest.States.Drag }
+
+func (a *animatedModel) requestInteraction(interactionID string) bool {
+	if a.reduceMotion || interactionID == "" {
+		return false
+	}
+	interaction, ok := a.pack.Interaction(interactionID)
+	if !ok {
+		return false
+	}
+	steps := append([]petpack.Step(nil), interaction.Steps...)
+	if len(steps) == 0 {
+		// Feedback-only interactions (bubble, sound, bounce/lift) do not
+		// interrupt a running clip. The host still plays them immediately.
+		return true
+	}
+	a.sequence = steps
+	a.sequenceIndex = 0
+	a.sequenceAt = time.Time{}
+	a.pendingOnce = ""
+	a.queuedOnce = nil
+	return true
+}
+
+func (a *animatedModel) clearSequence() {
+	a.sequence = nil
+	a.sequenceIndex = 0
+	a.sequenceAt = time.Time{}
+}
+
+func (a *animatedModel) startNextSequence(now time.Time) bool {
+	for a.sequenceIndex < len(a.sequence) {
+		step := a.sequence[a.sequenceIndex]
+		a.sequenceIndex++
+		if step.Action == "" {
+			continue
+		}
+		if a.startAction(step.Action, now) {
+			a.sequenceAt = time.Time{}
+			return true
+		}
+	}
+	a.clearSequence()
+	return false
 }
 
 func (a *animatedModel) requestAction(id string) {
 	if a.reduceMotion || id == "" {
 		return
 	}
-	// The first-launch wave can be requested before the first View syncs.
+	a.clearSequence()
+	// The first-launch intro can be requested before the first View syncs.
 	// Background update notifications must queue behind it instead of
 	// replacing the only chance to play the intro.
-	if a.pendingOnce == "wave" && id != "wave" {
+	intro := ""
+	if a.pack != nil {
+		intro = a.pack.Manifest.Events.Intro
+	}
+	if intro != "" && a.pendingOnce == intro && id != intro {
 		for _, queued := range a.queuedOnce {
 			if queued == id {
 				return
@@ -371,23 +426,23 @@ func (a *animatedModel) requestBackgroundAction(id string) {
 }
 
 func (a *animatedModel) requestDragStart() {
-	if a.reduceMotion {
+	if a.reduceMotion || a.dragActionID() == "" {
 		return
 	}
+	a.clearSequence()
 	a.pendingDrag = true
 	a.pendingDrop = false
-	a.pendingReaction = ReactionNone
 	a.pendingOnce = ""
 }
 
 func (a *animatedModel) requestDragEnd() {
-	if a.reduceMotion {
+	if a.reduceMotion || a.dragActionID() == "" {
 		return
 	}
 	a.pendingDrop = true
 }
 
-func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duration, dragging bool, reaction Reaction, reactionAt time.Time, reduceMotion bool) {
+func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duration, dragging bool, reduceMotion bool) {
 	if !a.lastView.IsZero() && now.Sub(a.lastView) > animatedResetGap &&
 		!dragging && !a.dragActive && !a.pendingDrop {
 		// A hidden or suspended window must not replay a long backlog of
@@ -400,6 +455,7 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 		a.current = nil
 		a.dragActive = false
 		a.pendingDrop = false
+		a.restPoster = nil
 	}
 	a.lastView = now
 	if reduceMotion {
@@ -412,67 +468,86 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 		}
 		a.pendingDrag = false
 		a.pendingDrop = false
-		a.pendingReaction = ReactionNone
+		a.dragActive = false
 		a.pendingOnce = ""
 		a.queuedOnce = nil
+		a.clearSequence()
+		a.restPoster = nil
 		a.asleep = activity == ActivityAsleep
 		return
 	}
 	if a.reduceMotion {
 		a.reduceMotion = false
 		a.current = nil
+		a.restPoster = nil
 	}
 	a.asleep = false
+	a.restPoster = nil
+	idleID := a.idleActionID()
+	dragID := a.dragActionID()
 
 	if a.pendingDrop && a.dragActive {
 		a.dragActive = false
 		a.pendingDrop = false
-		a.startExit("drag", now)
+		a.startExit(dragID, now)
 		return
 	}
 	if a.pendingDrag && !dragging {
 		// The drag started and ended between two frames; skip the grab
 		// segment and go straight to the drop.
 		a.pendingDrag = false
-		a.pendingDrop = true
+		a.pendingDrop = dragID != ""
 	}
 	if a.pendingDrop && !a.dragActive {
 		a.pendingDrop = false
-		a.startExit("drag", now)
+		a.startExit(dragID, now)
 		a.advance(now)
 		return
 	}
 	if a.pendingDrag && dragging {
 		a.pendingDrag = false
-		a.dragActive = true
-		a.startAction("drag", now)
+		if dragID != "" && a.startAction(dragID, now) {
+			a.dragActive = true
+		}
 	}
 
 	if a.dragActive {
 		if !dragging {
 			a.dragActive = false
-			a.startExit("drag", now)
+			a.startExit(dragID, now)
 			return
 		}
-		if a.current == nil || a.current.actionID != "drag" || a.current.phase == phaseExit {
-			a.startAction("drag", now)
+		if a.current == nil || a.current.actionID != dragID || a.current.phase == phaseExit {
+			a.startAction(dragID, now)
 		}
 		a.advance(now)
 		return
 	}
 
-	if a.pendingReaction != ReactionNone {
-		actionID := "happy"
-		if a.pendingReaction == ReactionFace {
-			actionID = "laugh"
+	if a.sequenceIndex < len(a.sequence) && (a.current == nil || a.current.actionID == idleID) {
+		// The first step's delay starts when the interaction is requested.
+		// Later delays are scheduled by finishCurrent; keeping idle alive
+		// while waiting avoids freezing on a static poster.
+		if a.sequenceAt.IsZero() && a.sequenceIndex == 0 {
+			if delay := a.sequence[0].DelayMs; delay > 0 {
+				a.sequenceAt = now.Add(time.Duration(delay) * time.Millisecond)
+				if a.current == nil {
+					a.startIdle(now)
+				}
+			}
 		}
-		a.startAction(actionID, now)
-		a.pendingReaction = ReactionNone
+		if a.sequenceAt.IsZero() || !now.Before(a.sequenceAt) {
+			if a.startNextSequence(now) {
+				a.advance(now)
+				return
+			}
+		}
 	}
+
 	if a.pendingOnce != "" && a.current != nil && a.current.actionID == a.pendingOnce {
 		a.pendingOnce = ""
 	}
-	if a.pendingOnce != "" && (a.current == nil || a.current.actionID == "idle") {
+	if a.pendingOnce != "" && (a.current == nil || a.current.actionID == idleID) {
 		id := a.pendingOnce
 		a.pendingOnce = ""
 		a.startAction(id, now)
@@ -481,26 +556,92 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 	if activity == ActivityAwake {
 		a.drowsyPlayed = false
 		a.asleep = false
-	}
-	if activity == ActivityAsleep && (a.current == nil || a.current.actionID == "idle") {
-		if a.current != nil && a.current.provider != nil {
-			a.current.provider.Close()
+		if a.current != nil && (a.current.actionID == a.pack.Manifest.States.Drowsy ||
+			a.current.actionID == a.pack.Manifest.States.Asleep) {
+			if a.current.provider != nil {
+				a.current.provider.Close()
+			}
+			a.current = nil
 		}
-		a.current = nil
-		a.asleep = true
+	}
+	if activity == ActivityAsleep {
+		a.enterAsleep(now)
 		return
 	}
-	if activity == ActivityDrowsy && !a.drowsyPlayed && (a.current == nil || a.current.actionID == "idle") {
-		a.drowsyPlayed = true
-		if a.startAction("sleep_denial", now) {
-			a.advance(now)
-			return
+	if activity == ActivityDrowsy {
+		drowsyID := a.pack.Manifest.States.Drowsy
+		if !a.drowsyPlayed && (a.current == nil || a.current.actionID == idleID) {
+			a.drowsyPlayed = true
+			if drowsyID != "" && a.startAction(drowsyID, now) {
+				a.advance(now)
+				return
+			}
+		}
+		// A drowsy action with clips plays once and returns to idle. Only a
+		// poster-only action holds a static pose for the whole drowsy period.
+		if drowsyID != "" && (a.current == nil || a.current.actionID == idleID) {
+			if action, ok := a.pack.Action(drowsyID); ok && !actionHasClip(action) &&
+				a.holdStatePoster(drowsyID) {
+				return
+			}
 		}
 	}
 	if a.current == nil {
 		a.startIdle(now)
 	}
 	a.advance(now)
+}
+
+func actionHasClip(action petpack.Action) bool {
+	return action.Once != "" || action.Enter != "" || action.Loop != "" || action.Exit != ""
+}
+
+// holdStatePoster displays an action's poster without playing a clip. Drowsy
+// and asleep states use this when a pack only declares a static pose.
+func (a *animatedModel) holdStatePoster(actionID string) bool {
+	action, ok := a.pack.Action(actionID)
+	if !ok || action.Poster == "" {
+		return false
+	}
+	if a.current != nil {
+		if a.current.provider != nil {
+			a.current.provider.Close()
+		}
+		a.current = nil
+	}
+	a.restPoster = a.posterFor(actionID)
+	return a.restPoster != nil
+}
+
+func (a *animatedModel) enterAsleep(now time.Time) {
+	id := a.pack.Manifest.States.Asleep
+	if id != "" && a.current != nil && a.current.actionID == id {
+		a.asleep = true
+		a.advance(now)
+		return
+	}
+	a.clearSequence()
+	if a.current != nil && a.current.provider != nil {
+		a.current.provider.Close()
+	}
+	a.current = nil
+	a.asleep = true
+	if id == "" {
+		return
+	}
+	action, ok := a.pack.Action(id)
+	if !ok {
+		return
+	}
+	if action.LoopCount < 0 && action.Loop != "" {
+		if a.startAction(id, now) {
+			a.advance(now)
+			return
+		}
+	}
+	if action.Poster != "" {
+		a.restPoster = a.posterFor(id)
+	}
 }
 
 func (a *animatedModel) startExit(actionID string, now time.Time) {
@@ -529,19 +670,31 @@ func (a *animatedModel) advance(now time.Time) {
 		if now.Sub(current.frameStart) < duration {
 			return
 		}
-		current.frameStart = current.frameStart.Add(duration)
-		current.frame++
-		if current.frame < current.provider.Len() {
+		if current.frame+1 < current.provider.Len() {
+			current.frameStart = current.frameStart.Add(duration)
+			current.frame++
 			continue
+		}
+		// The last frame is on screen. A pack can hold it before entering
+		// the next phase; this is the asset-level timing beat.
+		if current.holdUntil.IsZero() {
+			if hold := actionHold(current.action, current.phase); hold > 0 {
+				current.holdUntil = current.frameStart.Add(duration).Add(hold)
+				return
+			}
+		} else if now.Before(current.holdUntil) {
+			return
+		} else {
+			current.holdUntil = time.Time{}
 		}
 		switch current.phase {
 		case phaseEnter:
 			if current.action.Loop != "" && current.action.LoopCount != 0 {
-				if a.startSegment(current.actionID, current.action, phaseLoop, current.action.Loop, current.frameStart) {
+				if a.startSegment(current.actionID, current.action, phaseLoop, current.action.Loop, now) {
 					continue
 				}
 			}
-			if current.action.Exit != "" && a.startSegment(current.actionID, current.action, phaseExit, current.action.Exit, current.frameStart) {
+			if current.action.Exit != "" && a.startSegment(current.actionID, current.action, phaseExit, current.action.Exit, now) {
 				continue
 			}
 			a.finishCurrent(now)
@@ -549,16 +702,18 @@ func (a *animatedModel) advance(now time.Time) {
 		case phaseLoop:
 			if current.action.LoopCount < 0 {
 				current.frame = 0
+				current.frameStart = now
 				current.provider.Reset()
 				continue
 			}
 			current.loops++
 			if current.loops < current.action.LoopCount {
 				current.frame = 0
+				current.frameStart = now
 				current.provider.Reset()
 				continue
 			}
-			if current.action.Exit != "" && a.startSegment(current.actionID, current.action, phaseExit, current.action.Exit, current.frameStart) {
+			if current.action.Exit != "" && a.startSegment(current.actionID, current.action, phaseExit, current.action.Exit, now) {
 				continue
 			}
 			a.finishCurrent(now)
@@ -570,20 +725,37 @@ func (a *animatedModel) advance(now time.Time) {
 	}
 }
 
+func actionHold(action petpack.Action, phase playPhase) time.Duration {
+	var millis int
+	switch phase {
+	case phaseEnter:
+		millis = action.Timing.EnterHoldMs
+	case phaseLoop:
+		millis = action.Timing.LoopHoldMs
+	case phaseExit, phaseOnce:
+		millis = action.Timing.ExitHoldMs
+	}
+	if millis <= 0 {
+		return 0
+	}
+	return time.Duration(millis) * time.Millisecond
+}
+
 func (a *animatedModel) finishCurrent(now time.Time) {
 	if a.current != nil && a.current.provider != nil {
 		a.current.provider.Close()
 	}
 	a.current = nil
-	if a.pendingReaction != ReactionNone {
-		actionID := "happy"
-		if a.pendingReaction == ReactionFace {
-			actionID = "laugh"
+	if a.sequenceIndex < len(a.sequence) {
+		if delay := a.sequence[a.sequenceIndex].DelayMs; delay > 0 {
+			a.sequenceAt = now.Add(time.Duration(delay) * time.Millisecond)
+			a.startIdle(now)
+		} else {
+			a.sequenceAt = time.Time{}
 		}
-		a.startAction(actionID, now)
-		a.pendingReaction = ReactionNone
 		return
 	}
+	a.clearSequence()
 	if a.pendingOnce != "" {
 		id := a.pendingOnce
 		a.pendingOnce = ""
@@ -607,12 +779,15 @@ func (a *animatedModel) currentImage() image.Image {
 			return img
 		}
 	}
+	if a.restPoster != nil {
+		return a.restPoster
+	}
 	return a.poster
 }
 
-func (a *animatedModel) imageFor(now time.Time, activity Activity, dragging bool, reaction Reaction, reactionAt time.Time, reduceMotion bool) image.Image {
+func (a *animatedModel) imageFor(now time.Time, activity Activity, dragging bool, interactionID string, interactionAt time.Time, reduceMotion bool) image.Image {
 	if reduceMotion {
-		return a.reducedImage(activity, dragging, reaction, reactionAt, now)
+		return a.reducedImage(activity, dragging, interactionID, interactionAt, now)
 	}
 	return a.currentImage()
 }
@@ -633,10 +808,10 @@ func (a *animatedModel) bitmapFor(img image.Image) *ui.Bitmap {
 	return a.bitmap
 }
 
-func (a *animatedModel) nextDelay(now time.Time, activity Activity, idle time.Duration, reactionAt time.Time, reduceMotion bool) time.Duration {
+func (a *animatedModel) nextDelay(now time.Time, activity Activity, idle time.Duration, interactionAt time.Time, reduceMotion bool) time.Duration {
 	if reduceMotion {
-		if a.reactionActive(now, reactionAt) {
-			return max(animatedReduceMotionReaction-now.Sub(reactionAt), time.Millisecond)
+		if a.reactionActive(now, interactionAt) {
+			return max(animatedReduceMotionFeedback-now.Sub(interactionAt), time.Millisecond)
 		}
 		switch activity {
 		case ActivityAsleep:
@@ -647,14 +822,53 @@ func (a *animatedModel) nextDelay(now time.Time, activity Activity, idle time.Du
 			return max(drowsyAfter-idle, 0)
 		}
 	}
-	if a.asleep {
-		return 0
+	base := a.clipDelay(now, activity)
+	if a.reactionActive(now, interactionAt) {
+		return activeFrameInterval
+	}
+	if a.idleMotionBob() {
+		interval := idleFrameInterval
+		switch activity {
+		case ActivityDrowsy:
+			interval = drowsyFrameInterval
+		case ActivityAsleep:
+			interval = asleepFrameInterval
+		}
+		if base == 0 || interval < base {
+			return interval
+		}
+		return base
+	}
+	return base
+}
+
+func (a *animatedModel) clipDelay(now time.Time, activity Activity) time.Duration {
+	idleID := a.idleActionID()
+	if a.sequenceIndex < len(a.sequence) && (a.current == nil || a.current.actionID == idleID) {
+		wait := time.Millisecond
+		if !a.sequenceAt.IsZero() {
+			wait = max(a.sequenceAt.Sub(now), time.Millisecond)
+		}
+		if a.current != nil && a.current.provider != nil {
+			duration := a.current.provider.Duration(a.current.frame)
+			if duration <= 0 {
+				duration = 33 * time.Millisecond
+			}
+			idleWait := max(duration-now.Sub(a.current.frameStart), time.Millisecond)
+			if idleWait < wait {
+				return idleWait
+			}
+		}
+		return wait
 	}
 	if a.current != nil && a.current.provider != nil {
 		if a.current.provider.Failed() {
-			// Stop asking for frames after a decode error. The next sync or
-			// interaction will finish the broken clip and return to idle.
-			return 0
+			// Ask for one more frame so sync can finish the broken clip and
+			// return to idle. Returning zero here would freeze on the poster.
+			return time.Millisecond
+		}
+		if !a.current.holdUntil.IsZero() {
+			return max(a.current.holdUntil.Sub(now), time.Millisecond)
 		}
 		duration := a.current.provider.Duration(a.current.frame)
 		if duration <= 0 {
@@ -662,44 +876,55 @@ func (a *animatedModel) nextDelay(now time.Time, activity Activity, idle time.Du
 		}
 		return max(duration-now.Sub(a.current.frameStart), time.Millisecond)
 	}
-	if a.idleFailed.Load() {
+	if a.idleFailed.Load() || activity == ActivityAsleep {
 		return 0
 	}
 	return 100 * time.Millisecond
 }
 
-func (a *animatedModel) reactionActive(now, reactionAt time.Time) bool {
-	return !reactionAt.IsZero() && now.Sub(reactionAt) < animatedReduceMotionReaction
+func (a *animatedModel) idleMotionBob() bool {
+	return a.pack.Manifest.IdleMotion == "bob"
 }
 
-func (a *animatedModel) faceClickable(dragging bool) bool {
+func (a *animatedModel) reactionActive(now, reactionAt time.Time) bool {
+	return !reactionAt.IsZero() && now.Sub(reactionAt) < animatedReduceMotionFeedback
+}
+
+func (a *animatedModel) hotzonesClickable(dragging bool) bool {
 	if dragging {
 		return false
 	}
 	if a.current == nil {
 		return true
 	}
-	return a.current.action.FaceClickable
+	return a.current.action.Interruptible
 }
 
-func (a *animatedModel) reducedImage(activity Activity, dragging bool, reaction Reaction, reactionAt time.Time, now time.Time) image.Image {
-	if dragging {
-		if poster := a.posterFor("drag"); poster != nil {
+func (a *animatedModel) reducedImage(activity Activity, dragging bool, interactionID string, interactionAt time.Time, now time.Time) image.Image {
+	if dragging && a.dragActionID() != "" {
+		if poster := a.posterFor(a.dragActionID()); poster != nil {
 			return poster
 		}
 	}
-	if reaction != ReactionNone && !reactionAt.IsZero() && now.Sub(reactionAt) < animatedReduceMotionReaction {
-		actionID := "happy"
-		if reaction == ReactionFace {
-			actionID = "laugh"
-		}
-		if poster := a.posterFor(actionID); poster != nil {
-			return poster
+	if interactionID != "" && !interactionAt.IsZero() && now.Sub(interactionAt) < animatedReduceMotionFeedback {
+		if interaction, ok := a.pack.Interaction(interactionID); ok && interaction.ReducedPoster != "" {
+			if poster := a.reducedPoster(interaction.ReducedPoster); poster != nil {
+				return poster
+			}
 		}
 	}
-	if activity == ActivityDrowsy {
-		if poster := a.posterFor("sleep_denial"); poster != nil {
-			return poster
+	switch activity {
+	case ActivityDrowsy:
+		if id := a.pack.Manifest.States.Drowsy; id != "" {
+			if poster := a.posterFor(id); poster != nil {
+				return poster
+			}
+		}
+	case ActivityAsleep:
+		if id := a.pack.Manifest.States.Asleep; id != "" {
+			if poster := a.posterFor(id); poster != nil {
+				return poster
+			}
 		}
 	}
 	return a.poster
@@ -722,25 +947,17 @@ func (a *animatedModel) posterFor(actionID string) image.Image {
 	return poster
 }
 
-func (a *animatedModel) onceActions() []AnimatedAction {
-	order := []string{"belly_taunt", "pretend_deaf", "smug_stumble", "sleep_denial", "play_innocent", "edge_peek"}
-	var out []AnimatedAction
-	seen := make(map[string]bool, len(order))
-	for _, id := range order {
-		if action, ok := a.pack.Action(id); ok && action.Once != "" && action.Label != "" {
-			out = append(out, AnimatedAction{ID: id, Label: action.Label})
-			seen[id] = true
-		}
+func (a *animatedModel) reducedPoster(poster string) image.Image {
+	if cached, ok := a.reducedPosters[poster]; ok {
+		return cached
 	}
-	var rest []AnimatedAction
-	for id, action := range a.pack.Manifest.Actions {
-		if seen[id] || action.Once == "" || action.Label == "" {
-			continue
-		}
-		rest = append(rest, AnimatedAction{ID: id, Label: action.Label})
+	img, err := a.pack.PosterFrame(poster)
+	if err != nil {
+		log.Printf("lucia: pet pack reduced poster %q: %v", poster, err)
+		return nil
 	}
-	sort.Slice(rest, func(i, j int) bool { return rest[i].ID < rest[j].ID })
-	return append(out, rest...)
+	a.reducedPosters[poster] = img
+	return img
 }
 
 func (a *animatedModel) canPlayActions() bool {

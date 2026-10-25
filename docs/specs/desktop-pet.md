@@ -1,141 +1,182 @@
-# 桌宠规格（内置素材 + 外部动画素材包）
+# 桌宠规格（声明式素材包）
 
-更新日期：2026-10-24。本文维护桌宠窗口、常驻生命周期、idle 行为、点击互动、气泡与外部动画素材包的单一事实来源；模块关系见 [architecture.md](../architecture.md)，内置素材授权见 [NOTICE.md](../../internal/pet/assets/deepseek-whale/NOTICE.md)。
+更新日期：2026-10-25。本文维护桌宠窗口、常驻生命周期、idle 行为、交互、气泡与素材包合同的单一事实来源；模块关系见 [architecture.md](../architecture.md)，内置素材授权见 [NOTICE.md](../../internal/builtinpack/whale/NOTICE.md)。
 
 ## 目标
 
-启动后直接出现一只透明、无边框、置顶的桌宠。它可以拖动，有 idle 动画和眨眼，位置在重启后恢复；点击脸部与右键“摸摸头”会做出不同反应并显示台词；托盘可以显示或隐藏它、打开 Lucia 控制台并退出应用。
+启动后直接出现一只透明、无边框、置顶的桌宠。它可以拖动，有 idle 动画和眨眼，位置在重启后恢复；点击热区与右键菜单会触发素材包声明的交互。托盘可以显示或隐藏它、打开 Lucia 控制台并退出应用。
 
-内置的 DeepSeek 鲸鱼继续使用三张静态 PNG 和程序化眨眼/压扁；用户也可以把透明 WebP 动画包导入到数据目录，切换到带完整 idle、情绪、特殊动作和拖动动画的皮肤。外部素材包按用户本地授权使用，不随安装包、仓库或 CI 分发。
+内置鲸鱼和外部皮肤共用同一个 manifest、加载器与播放器。内置包通过 `embed.FS` 编入二进制，不释放到数据目录；以后更换默认皮肤只需替换 `internal/builtinpack/whale/`，不改渲染代码。
 
 ## 窗口形态
 
 | 选项 | 值 |
 |---|---|
-| 内置素材尺寸 | 基础 248×248 DIP（1.0×），立绘 240×240 居中 |
-| 外部素材尺寸 | 由 `pack.json` 的 `base.window` 与 `base.sprite` 定义；naiwa 导入默认 248×310 / 240×300 |
-| 缩放 | 窗口、立绘、脸部热区和气泡锚点按用户尺寸档位同比缩放 |
+| 内置素材尺寸 | 窗口 248×248 DIP，立绘 240×240 居中 |
+| 外部素材尺寸 | 由 manifest 的 `base.window` 与 `base.sprite` 定义 |
+| 缩放 | 窗口、立绘、热区和气泡锚点按用户尺寸档位同比缩放 |
 | `Frameless` / `Transparent` | `true`，窗口本身没有标题栏和底色 |
 | `AlwaysOnTop` / `Panel` | `true`，浮在其他应用之上，不抢当前应用的焦点 |
 | `SkipTaskbar` / `DisableShadow` | `true`，不占任务栏，不出现矩形窗口阴影 |
 | 固定形态 | `DisableResize`、`DisableMinimize`、`DisableMaximize`、`DisableFullScreen` 均为 `true` |
 | 位置 | `StateKey: "pet"`；首次出现在主屏工作区右下角，距边缘 24 DIP |
 
-视图根节点使用透明背景，立绘以 `ui.Image` 绘制。窗口本身是 `DragWindow` 手柄，拖动主体、衣领或窗口其他区域移动窗口；脸部另有一个透明点击区域，点击它触发互动。透明边距不额外扩大窗口。
+视图根节点使用透明背景，立绘以 `ui.Image` 绘制。窗口本身是 `DragWindow` 手柄，拖动主体、衣领或窗口其他区域移动窗口；热区是独立的透明点击层。透明边距不额外扩大窗口。
 
-当素材宽高比与 `base.sprite` 不同时，立绘按 `Contain` 居中留边；脸部热区和气泡锚点跟随实际绘制区域，而不是外框。`Model` 的 `WindowSize()`、`SpriteSize()`、`ImageRect()`、`FaceRegion()` 和 `BubbleRect()` 是窗口接线的唯一几何来源。窗口从 1.0× 切换尺寸档位或换素材包时保持底边中点不动，避免角色脚部跳动。
+当素材宽高比与 `base.sprite` 不同时，立绘按 `Contain` 居中留边；热区和气泡锚点跟随实际绘制区域，而不是外框。`Model` 的 `WindowSize()`、`SpriteSize()`、`ImageRect()`、`Hotzones()` 和 `BubbleRect()` 是窗口接线的唯一几何来源。窗口从 1.0× 切换尺寸档位或换素材包时保持底边中点不动。
 
 ## 窗口位置约束
 
 拖动和恢复使用两套时机，避免把“跨显示器”误判成“拖出屏幕”：
 
-- 拖动由系统原生 `DragWindow` 完成。它在两块显示器之间移动时由系统接管，不会出现自绘 `SetPosition` 触发的吸附和来回跳动。
-- 原生拖动允许宠物短暂越过屏幕边缘。`Window.OnMove` 发现窗口落在有效区域外时开始观察，等主键松开后再按下面的规则收回；macOS 用 `NSEvent.pressedMouseButtons`，Windows 用 `GetAsyncKeyState` 查询按键状态，因此按住不放不会被打断。Linux 暂无对应的 MyGo 接口，暂以 300 ms 稳定延迟代替，且不在当前发布矩阵内。
-- 恢复时，窗口完整落在一个显示器的工作区内就不动；横跨两块显示器且完整落在物理范围并集内时保留；其余位置按最小位移收回到最近的显示器工作区。工作区排除了菜单栏、Dock 和任务栏。
-- 启动和显示器变化也走恢复路径：先撤销意外的最大化、恢复固定尺寸，再按同一规则恢复位置。这样拔掉外接显示器或修改分辨率后，旧位置不会把宠物留在不可达区域。
+- 拖动由系统原生 `DragWindow` 完成；跨显示器时由系统接管，不会出现自绘 `SetPosition` 触发的吸附和跳动。
+- 原生拖动允许宠物短暂越过屏幕边缘。`Window.OnMove` 发现窗口落在有效区域外时开始观察，等主键松开后再收回。macOS 用 `NSEvent.pressedMouseButtons`，Windows 用 `GetAsyncKeyState`，Linux 暂用 300 ms 稳定延迟。
+- 恢复时，窗口完整落在一个显示器工作区内就不动；横跨两块显示器且完整落在物理范围并集内时保留；其余位置按最小位移收回到最近的显示器工作区。工作区排除菜单栏、Dock 和任务栏。
+- 启动和显示器变化也走恢复路径：先撤销意外的最大化、恢复固定尺寸，再按同一规则恢复位置。
 
-`pet.Display` 同时保留 `ScaleFactor`，供后续按显示器重建缓存；当前动画缓存按同一比例缩放到 `base.sprite × 2` 与 `crop` 原生尺寸的上限内，保持 `crop` 宽高比。
+`pet.Display` 保留 `ScaleFactor`，供后续按显示器重建缓存；当前动画缓存按同一比例缩放到 `base.sprite × 2` 与 `crop` 原生尺寸的上限内，保持 `crop` 宽高比。
 
-## 点击互动
+## 交互与热区
 
-- 内置素材的脸部点击区位于半身立绘的眼睛/脸颊区域；在 1.0× 下约为窗口内 `(78,112) 100×76` DIP。点击它触发 450 ms 的压扁—回弹动画，底部保持不动。
-- 动画素材包的脸部热区由 `pack.json` 的 `face` 定义，归一化到裁剪后的实际立绘。点脸映射到 `laugh`，右键“摸摸头”映射到 `happy`；两者都走 `enter → exit` 的短反馈，不再叠加程序化压扁或呼吸浮动。
-- 动画播放期间，脸部点击区只在 `faceClickable` 为 `true` 的 idle / happy / laugh 状态保留；特殊动作和拖动期间关闭，避免固定热区落在移动后的角色上。
-- 脸部点击区不承担拖动；拖动身体、衣领或窗口其他区域移动宠物。这是 MyGo v0.5.5 中 `DragWindow` 与 `OnClick` 不能落在同一元素上的直接结果。
-- 右键任意宠物区域打开上下文菜单：摸摸头、特殊动作（仅动画包，直接列在一级菜单）、桌宠设置、隐藏宠物、重置位置。退出只保留在托盘，避免误触。
-- 动画包的 6 个特殊动作直接列在一级菜单：肚肚挑衅、假装没听见、得意过头、困到点头、装无辜、偷偷探头；它们与设置/隐藏/重置之间用分隔线隔开。随机闲时动作默认关闭，后续增量再提供开关。
-- 点击互动只改变视图内的帧，不移动窗口，也不会打断系统拖动；Reduce Motion 下改为静态海报帧切换。
-- 拖动开始播 `grab_enter → drag_loop`；拖动结束硬切 `drop_exit`，不等待 2 秒的 loop 边界；很快的拖动跳过 grab，直接播 drop。拖动优先级高于脸部和特殊动作。
+- 热区由 manifest 的 `hotzones` 有序数组声明。每项 `{id, label, rect, interaction}`，`rect` 归一化到 `crop`；数组顺序就是重叠优先级，后声明者优先命中。
+- interact 由 `interactions` 声明：`{label, steps, bubble, sound, motion, reducedPoster}`。`steps` 可为空；此时通过气泡、声音或 `motion` 提供反馈。`motion` 取 `none`、`bounce`、`lift`；`squash` 作为旧包兼容别名等同于 `bounce`。`sound` 独立于气泡：`bubble: none` 时仍可播放声音。
+- `bounce` 是 360 ms、向上 4 px 的轻弹；`lift` 是 520 ms、向上 3 px 的缓慢抬升。两者都只做垂直位移，不缩放立绘，窗口位置不动。
+- `steps` 每项 `{action, delayMs}`。第一步的 `delayMs` 从触发时开始等待，后续步骤的 `delayMs` 在上一步结束后等待；上限 60000 ms。等待期间继续播放 idle。
+- 动作播放期间是否接受热区点击由动作的 `interruptible` 决定。声明了热区时，`states.idle` 指向的动作必须为 `interruptible: true`。
+- 右键菜单由 manifest 的 `menu` 声明：每项引用一个 `interaction` 或一个有限 `action`，两者都必须有非空 `label`。宿主固定的“桌宠设置 / 隐藏宠物 / 重置位置”永远在分隔线下方。
+- 内置鲸鱼的“摸摸脸”是 `poke` 交互，使用 `bounce`；“摸摸头”是 `pat` 交互，使用 `lift`。两者都只有气泡、声音和垂直位移，不播放额外 clip。外部包可以用 `steps` 播放任意有限动作；若步骤本身已有明显反应，可省略 `motion`。
+- 拖动、特殊动作和 Reduce Motion 会清空未开始的步骤。拖动期间热区不可点击。
+- Reduce Motion 下不播放连续动画：idle 显示海报，交互显示 `reducedPoster` 1.2 秒，状态切换时才预约下一帧。
 
 ## 气泡
 
-- 气泡是独立的透明 Panel 窗口，固定 240×100 DIP；卡片为 228×80，外侧留出尾巴空间；不设 `StateKey`，不写入窗口位置。
-- 整窗调用 `SetIgnoreMouseEvents(true)`，所有点击穿透到下面的应用，不扩大宠物的矩形命中区。MyGo v0.5.5 的 Linux 后端没有实现该能力，因此 Linux 上不显示气泡，避免挡住点击；当前发布矩阵也不包含 Linux。
-- 摸脸和摸摸头各自维护一组台词，按顺序循环；未知反应不显示。
-- 气泡锚点是 `BubbleRect()`：横坐标取角色头部中心，纵坐标取头部上方；气泡翻到下方时使用窗口底边，避免压住角色身体。内置素材的锚点是立绘顶边居中（窗口四周只有 4 DIP 透明边距）。
-- 气泡优先显示在宠物上方，间距 8 DIP；上方放不下时翻到下方；水平位置限制在当前显示器工作区内。
-- 气泡尾巴指向宠物中心：气泡在上方时尾巴从卡片底边向下，翻到下方时从卡片顶边向上。气泡被屏幕边缘夹取时，尾巴横向位置也跟着夹在卡片圆角内，不会指向空白处。
-- 显示使用 `ShowInactive`，不抢当前应用的焦点；2.6 秒后自动隐藏。
+- 气泡是独立的透明 Panel 窗口，固定 264×116 DIP；卡片最大 228×88，实际高度随 1–3 行内容收缩，左右留 18 DIP、上下留 12/16 DIP 阴影空间；不设 `StateKey`，不写入窗口位置。
+- 气泡没有尾巴，依靠卡片与宠物的近距离、1px 边框和自定义柔影建立归属；不使用系统窗口阴影，也不做毛玻璃。
+- 卡片默认跟随应用主题：浅色为暖纸 `#FAF6EE`，深色为暖炭 `#2B2723`，均为 97% 不透明；`bubbleTheme` 可跟随应用主题，或单独固定为浅色/深色，只影响气泡。圆角 14，文字 14/500、行高 20、左对齐，最多 3 行，超出显示省略号。
+- 整窗调用 `SetIgnoreMouseEvents(true)`，所有点击穿透；Linux 后端不支持时隐藏气泡，当前发布矩阵也不包含 Linux。
+- 台词全部来自 manifest 的 `bubbles` 命名表，交互通过 `bubble` 键引用；同一键内按顺序循环。`none` 表示不显示。
+- 气泡锚点是 `BubbleRect()`：横坐标取角色头部中心，纵坐标取头部上方；翻转时使用对应侧。内置鲸鱼的锚点是立绘顶边居中。
+- 气泡优先显示在宠物上方，卡片底边距锚点 12 DIP，短文本只收缩卡片自身高度、不改变与宠物的间距；上方放不下时翻到下方；水平位置限制在当前显示器工作区内。
+- 上方气泡窗口底边会透明越过宠物顶部约 4 DIP，阴影留在透明区内，不压角色像素；下方气泡镜像。
+- 显示使用 `ShowInactive`，不抢焦点；2.6 秒后自动隐藏。
 - 设置里的气泡冷却会跳过冷却期内的后续气泡；选择“关闭”时只保留动作和音效。
-- 宠物开始移动、被托盘隐藏时立即隐藏气泡；拖动中不跟随宠物。应用退出时气泡窗口放行关闭，不再取消退出。
-- 气泡内容与定位由 `internal/pet` 的纯模型和测试覆盖，窗口生命周期由 `cmd/lucia/bubble_window.go` 管理。
+- 宠物开始移动、被托盘隐藏时立即隐藏气泡；拖动中不跟随宠物。
 
 ## 生命周期
 
 - 主窗口（Lucia 控制台）启动时隐藏，由托盘“打开 Lucia”、第二实例或 `lucia://` 深链接打开。
-- 关闭桌宠窗口、气泡窗口或控制台窗口只隐藏窗口，不退出进程。
-- `OnWindowAllClosed` 保留为空实现；只有托盘“退出”或 Cmd+Q 结束进程。
-- `OnBeforeQuit` 设置退出标记，各窗口的 `OnClose` 在退出时放行，平时阻止关闭并隐藏。
-- `OnActivate` 只在没有任何可见窗口时打开控制台；桌宠可见时，点击 Dock 图标不会突然弹出控制台。
-- 托盘提供“显示/隐藏宠物”“重置宠物位置”“打开 Lucia”“退出”四项。
-- 控制台桌宠页提供显示桌宠、桌宠大小、互动音效、气泡频率、开机自启和重置位置。
-- 外部素材包首次启动或“重置位置”时播一次 `wave`；首次提示状态写入 `petIntroPlayed`，避免每次启动都挥手。
+- 关闭桌宠窗口、气泡窗口或控制台窗口只隐藏窗口，不退出进程；`OnBeforeQuit` 放行退出时的关闭。
+- `OnActivate` 只在没有任何可见窗口时打开控制台。
+- 托盘提供“显示/隐藏宠物”“重置宠物位置”“打开 Lucia”“退出”。
+- 事件由 manifest 的 `events` 映射：`intro`、`activate`、`reset`、`update.checking`、`update.failed`，每项引用一个有限动作。没有声明的事件就是 no-op。
+- 首次启动只在当前包声明了 `events.intro` 时播放，并在首帧后写入 `petIntroPlayed`；内置鲸鱼不声明 intro，因此不会消耗这次机会。切换素材包时播放 `events.activate`，重置位置播放 `events.reset`。
 
 ## 设置
 
-- `settings.json` 包含 `petVisible`、`petScale`、`soundEnabled`、`bubbleCooldownSeconds`、`petPack` 和 `petIntroPlayed`。`petVisible` 默认 `true`，`petScale` 默认 `1.0`，`soundEnabled` 默认 `false`，`bubbleCooldownSeconds` 默认 `0`（每次互动），`petPack` 默认为空（内置鲸鱼），`petIntroPlayed` 默认 `false`。
-- `petPack` 指向 `<数据目录>/packs/<id>`。素材包缺失、manifest 损坏或动画解码失败时记录日志并退回内置鲸鱼，不阻止应用启动。
-- 加载时先取默认值再合并文件，旧配置缺少字段时保留这些默认值。
-- “桌宠大小”提供小（0.8×）、标准（1.0×）、大（1.25×）、特大（1.5×）四档；调整时窗口、立绘、脸部热区和气泡锚点一起缩放，气泡仍保持固定可读宽度。
-- 托盘显示/隐藏宠物会立即保存可见性；下次启动创建宠物窗口时直接使用该状态，隐藏状态不会闪一下再消失。
-- 控制台“显示桌宠”开关与托盘共享同一份状态；隐藏或显示都会同步控制台模型。
-- “互动音效”默认关闭；开启后摸脸和摸摸头播放 `cmd/lucia/pet_sound.go` 在内存中生成的双音短提示音，不引入第三方音频素材。
-- “气泡频率”提供“每次互动 / 最多每 30 秒 / 最多每 2 分钟 / 关闭”。冷却只限制气泡显示，不影响动作和音效。
-- 开机自启由 MyGo 的登录项接口读写；控制台每次重新打开时刷新系统当前状态，不使用 `settings.json` 复制一份可能失真的值。开发构建或未打包运行时如果系统拒绝，桌宠页显示错误并把开关回读到系统实际状态。
-- 控制台桌宠页的“桌宠位置”行提供“重置”按钮，把桌宠移回主屏工作区右下角，距边缘 24 DIP，并重新显示宠物。
+- `settings.json` 包含 `theme`、`petVisible`、`petScale`、`soundEnabled`、`bubbleCooldownSeconds`、`bubbleTheme`、`petPack` 和 `petIntroPlayed`。`theme` 取 `system`、`light`、`dark`，控制整个应用的明暗外观；`bubbleTheme` 取 `system`、`light`、`dark`，其中 `system` 表示跟随应用主题。两者的缺失、空值或未知值都按 `system`；`petPack` 为空表示应用默认包。
+- `petPack` 指向 `<数据目录>/packs/<id>`；`lucia-whale` 保留给内置包，不作为用户包加载。
+- 素材包缺失、manifest 损坏或动画解码失败时记录日志并退回内置包，同时清除 `petPack`/active，避免控制台继续显示“使用中”。
+- 加载时先取默认值再合并文件，旧配置缺少字段时保留默认值。
+- “桌宠大小”提供小（0.8×）、标准（1.0×）、大（1.25×）、特大（1.5×）四档；窗口、立绘、热区和气泡锚点一起缩放。
+- “互动音效”默认关闭；开启后交互的 `sound: true` 会播放内存生成的双音提示音，不引入第三方音频素材。
+- “气泡频率”提供“每次互动 / 最多每 30 秒 / 最多每 2 分钟 / 关闭”。冷却只限制气泡，不影响动作和音效。
+- 设置页按“组标题 + 独立卡片”组织：组标题在卡片外，每组一块带边框的卡片，组与组之间保持更大间距。
+- “主题模式”提供“跟随系统 / 浅色 / 深色”，默认跟随系统，控制控制台与原生窗口外观。
+- “气泡主题”提供“跟随应用 / 浅色 / 深色”，默认跟随应用主题；切换后当前可见气泡立即重绘。选择“跟随应用”时，说明文字会显示当前实际结果（随系统切换 / 浅色 / 深色），固定浅色或深色时则说明不受应用主题影响。
+- `bubbleTheme` 的持久化值 `system` 语义固定为“跟随应用”；如果以后 MyGo 提供系统外观 API 并新增真正的“跟随系统”，必须使用新值（例如 `os`），不能改变 `system` 的旧含义。
+- 开机自启由 MyGo 登录项接口读写；控制台每次打开时刷新系统状态。
 
-## 内置静态素材的 idle 行为
+## 内置鲸鱼包
 
-- 使用三帧透明 PNG：睁眼、半闭眼、闭眼。
-- 4 秒一个周期，3.8 秒开始眨眼；半闭 60 ms、闭眼 90 ms、再半闭 60 ms，然后回到睁眼。
-- 立绘以 3.2 秒周期上下浮动 2.5 DIP，窗口位置不动，避免与系统拖动冲突。
-- 距上次互动 60 秒后进入困倦，固定使用半闭眼帧；3 分钟后睡着，固定使用闭眼帧。摸脸和摸摸头都会唤醒；macOS/Windows 的拖动也会唤醒，Linux 暂无拖动信号。
-- 摸脸是 450 ms 的压扁回弹；摸摸头是 620 ms、幅度更小并带轻微上抬，两者无需额外素材即可区分。
-- 遵循系统 Reduce Motion：开启后不再做呼吸浮动、压扁回弹和上抬，点击反应改为短暂闭眼/半闭眼；气泡与困倦/睡眠状态仍然保留。
-- 动画时钟取自 `ui.Context.Now()`，视图用 `c.After` 按状态调度下一帧；互动约 60 fps，清醒约 30 fps，困倦约 15 fps，睡着约 10 fps；Reduce Motion 下只调度下一次眨眼或状态切换，睡着后不再主动重绘。状态由时钟推导，不使用 ticker 或后台计时器。
-- 点击、菜单互动和拖动开始/结束会通过 `Window.Invalidate` 立即请求一帧，避免休息状态下等待下一次眨眼。
+- `internal/builtinpack/whale/` 是一个标准 `schema: 1` 包：manifest、4 帧无损 idle WebP、源 PNG、LICENSE/NOTICE 和生成脚本。
+- idle WebP 帧时长为 3800 / 60 / 90 / 50 ms，循环一次正好 4 秒；困倦和睡着复用 `idle_loop#1` / `idle_loop#2` 海报，不额外生成单帧 WebP。
+- `crop` 固定为整张 800×800 画布，避免导入器自动裁剪改变缩放和热区位置。
+- `idleMotion: "bob"` 提供 3.2 秒周期、2.5 DIP 的呼吸浮动；awake、drowsy、asleep 都继续呼吸。
+- 源 PNG 保留在仓库作为生成输入，但不嵌入；`generate.sh` 使用 `img2webp -lossless -exact`，解码后像素与源图一致。
+- 托盘图标迁到 `internal/brand/`，属于应用品牌，不属于可替换皮肤；授权仍按原素材的 CC BY-NC-SA 条件。
+- `PetPack=""` 表示“应用默认包”，settings/lockfile 不写入 `lucia-whale`。读取到手工写入的保留 id 时归一化为空。
+- 内置包只读，只能启用和预览；`Delete`、`Install` 拒绝保留 id。内置包加载失败属于构建缺陷，`selfTest` 会直接失败。
 
-## 外部动画素材包
+## 素材包 manifest
 
-### 目录与 manifest
+素材包放在 `<数据目录>/packs/<id>/`，manifest 固定为 `pack.json`，clip 放在 `clips/`，统一使用 ASCII 文件名。
 
-- 素材包放在 `<数据目录>/packs/<id>/pack.json`，clip 文件放在 `clips/`，统一使用 ASCII 文件名。
-- `pack.json` 的 `schema` 当前为 `1`；`canvas`、`crop`、`base.window`、`base.sprite`、`face`、`bubbleAnchor` 定义几何；`clips` 保存文件名、帧数、循环标志和 SHA-256；`actions` 把 idle、happy、laugh、drag 和 6 个特殊动作映射到 clip。
-- `crop` 是素材画布内的不透明区域并集（导入时计算，外扩 2 px），用于减少透明边距；播放时先合成完整画布再裁剪。
-- 画布与窗口边长上限为 4096 px，单个 clip 帧数上限为 1000；解码器在分配画布前再次校验，畸形素材只会得到错误而不会 panic。
-- `base.window` / `base.sprite` 单位为 DIP；`face` 与 `bubbleAnchor` 归一化到裁剪后的实际立绘。
-- 导入工具 `cmd/petpack` 读取 zip，优先解析每个条目的 `0x7075` Unicode Path 扩展字段（校验其中记录的 CRC32）；缺失时按 GBK 解码中文名。clip ID 只依赖文件名开头的 ASCII 部分，避免编码差异影响识别；`__MACOSX/` 与 `._*` 资源叉条目会被跳过。
-- 导入只接受 `.webp`，丢弃 MP4 预览；限制单文件 64 MiB、解压总量 512 MiB，防止 zip-slip 与 zip 炸弹；先写临时目录，旧包备份后安装新包并校验，失败时回滚。
-- 素材包 manifest 写入 `license.status = "local-only"`；naiwa 素材不进入仓库、CI、安装包或发布资产。导入前必须由用户确认本地使用授权。
-- 导入命令（默认写入开发版数据目录）：
+```jsonc
+{
+  "schema": 1,
+  "id": "example",
+  "name": "示例桌宠",
+  "license": { "status": "..." },
+  "canvas": { "width": 800, "height": 800 },
+  "crop": { "x": 0, "y": 0, "width": 800, "height": 800 },
+  "base": { "window": {...}, "sprite": {...}, "margin": 4 },
+  "bubbleAnchor": { "x": 0.5, "y": 0.05 },
+  "clips": { "idle_loop": { "file": "clips/idle_loop.webp", "frames": 4, "loop": true } },
+  "actions": {
+    "idle": { "loop": "idle_loop", "poster": "idle_loop#0", "loopCount": -1, "interruptible": true }
+  },
+  "states": { "idle": "idle" },
+  "events": { "intro": "wave" },
+  "hotzones": [{ "id": "face", "label": "摸摸脸", "rect": {...}, "interaction": "poke" }],
+  "interactions": {
+    "poke": { "label": "摸摸脸", "bubble": "face", "sound": true, "motion": "bounce" }
+  },
+  "bubbles": { "face": ["..."] },
+  "menu": [{ "interaction": "poke" }],
+  "idleMotion": "bob"
+}
+```
+
+- 只有 `schema: 1`。缺失、其他值或未知字段都在严格解码阶段失败；代码中只有一个解析路径。素材包 `id` 只允许小写字母、数字、`_` 和 `-`，避免 macOS/Windows 大小写不敏感文件系统上的目录冲突。
+- `canvas`、`crop`、`base.window`、`base.sprite`、`bubbleAnchor` 定义几何；`crop` 是画布内的裁剪矩形，导入时计算不透明区域并外扩 2 px。
+- `clips` 保存文件名、帧数、循环标志和 SHA-256；`actions` 把状态和事件映射到 `enter/loop/exit/once` clip。`loopCount = -1` 表示持续循环，`0` 跳过 loop，`> 0` 播放指定遍数。
+- `states` 必填 `idle`，可声明 `drag`、`drowsy`、`asleep`。`asleep` 必须循环或提供 poster；未声明时显示 idle 海报。
+- `events`、`hotzones`、`interactions`、`bubbles`、`menu` 都可为空。没有热区时桌宠仍播放 idle，但立绘不可点击。
+- `idleMotion` 取 `none` 或 `bob`；`interaction.motion` 取 `none`、`bounce`、`lift`，并兼容旧值 `squash`。
+- 校验拒绝：空 rect 或超出 0–1、重复热区 id、未知 interaction/action/bubble、循环动作作为 steps 或菜单动作、负数或超过 60 秒的 delay/hold、motion-only 交互缺少 `reducedPoster`、空气泡行、超过 200 字的气泡、未知 clip/帧引用、Windows 保留目录名。`ImportZip`、`Store` 和面向用户包的 `ReadManifest` 还拒绝保留 id `lucia-whale`；内嵌包通过 `LoadFS` 读取。
+- 示例 manifest 见 [docs/examples/pet-pack.json](../examples/pet-pack.json)；示例中的 `frames` 是结构示意，实际值必须与 WebP 文件一致。
+- 画布与窗口边长上限为 4096 px，单个 clip 帧数上限为 1000；解码器在分配画布前再次校验。
+
+## 导入与控制台
+
+- 控制台与 `cmd/petpack` 共用导入器。zip 中任意层级最浅的 `pack.json` 或 `pack.meta.json` 提供 id、名称、几何、动作、状态、事件、热区、交互和菜单；缺失时从 zip 文件名推导 id 并生成显式 actions/states/events/menu，不生成热区或交互。`states.idle` 缺失时只补缺失的 `idle/drag/drowsy/asleep` 字段，不覆盖作者已声明的状态。CLI 默认尊重 manifest 中的 id、名称和几何，显式 `-id`/`-name` 才覆盖。
+- 导入只接受 `.webp`，丢弃 MP4 预览；限制 manifest 4 MiB、单文件 64 MiB、解压总量 512 MiB，防止 zip-slip 与 zip 炸弹；先写临时目录，旧包备份后安装新包并校验，失败时回滚。
+- `Store.Install(zip, replace)` 在 id 已存在且 `replace=false` 时返回 `*PackExistsError`，此时磁盘没有任何写入。控制台收到后弹出原生替换确认，确认后再以 `replace=true` 重试；取消无副作用。
+- 导入不再要求授权勾选，`license` 仅展示。同名冲突才出现替换确认。
+- 导入成功后桌宠立即切换；失败时保留原模型。列表可启用、删除未使用的包并预览海报、热区、交互步骤和动作时序。正在使用的包不能删除。
+- 导入和替换在后台执行，完成后通过 UI 线程更新控制台并切换模型；预览仍在 UI 线程执行。运行中的应用与开发工具不能同时导入（没有跨进程锁）。
+- 开发命令：
   ```sh
-  go run ./cmd/petpack -zip naiwa.zip
-  go run ./cmd/petpack -zip naiwa.zip -app Lucia   # 显式指定打包版
+  go run ./cmd/petpack -zip /path/to/pack.zip
+  go run ./cmd/petpack -zip /path/to/pack.zip -app Lucia
+  go run ./cmd/petpack -check <pack-dir>
   ```
-  `-force` 覆盖同名包，`-activate=false` 只导入不切换。数据目录默认自动选择最近使用的 `Lucia Dev`、`lucia` 或 `Lucia`；`go tool mygo dev` 用 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 用 `lucia`，打包版用 `Lucia`。导入前退出 Lucia，导入后重新启动生效。
+  `-force` 覆盖同名包，`-activate=false` 只导入不切换。数据目录默认自动选择最近使用的 `Lucia Dev`、`lucia` 或 `Lucia`。
 
-### 解码与播放
+## 解码与播放
 
 - 动画 WebP 的 `ANMF` 帧只覆盖画布的一部分，并依赖前一帧的 blend/dispose 状态；解码器必须按顺序合成，不能随机跳帧。循环回到第 0 帧时清空画布重新开始。
-- 使用 `golang.org/x/image/webp` 解码单帧，Lucia 自己解析 RIFF/ANMF；不引入 cgo，也不要求自绘 WebView。
+- 使用 `golang.org/x/image/webp` 解码单帧，Lucia 自己解析 RIFF/ANMF；不引入 cgo。
 - 每帧使用自身时长（41/42 ms，特殊动作存在 500 ms、1083 ms 的停顿帧），不能按固定 24 fps 推导。
-- idle 在启动时先显示海报帧，再在后台解码并缓存全部帧；缓存按同一比例缩放到 `base.sprite × 2` 以内，不超过 `crop` 原生尺寸，保持 `crop` 宽高比。naiwa 的裁剪为 379×577，缓存约 84 MB。
-- 其他 clip 不预加载，播放时按顺序解码；解码发生在 UI 线程，单帧约 6 ms，低于 24 fps 的 41.7 ms 预算。若后续真机出现卡顿，再增加后台预读环形缓冲。
-- 状态机按“拖动 > 用户互动 > 特殊动作 > 困倦 > idle”排序。`enter` 播完进入 `loop`；`loopCount = 0` 直接进入 `exit`，`loopCount = -1` 持续循环直到状态结束，`loopCount > 0` 播完指定遍数后进入 `exit`。
-- idle 与拖动循环使用缓存/流式帧；特殊动作只播一次。素材没有睡眠动画，困倦时播一次 `sleep_denial`，睡着后冻结在 idle 海报帧。
-- 系统事件接法：更新检查/下载阶段播 `think`，更新失败播 `sad`；首次启动和“重置位置”播一次 `wave`。`listen` 与 `speak` 暂时只保留在 manifest 中，等有稳定的产品触发源和气泡时长联动后再接。
-- Reduce Motion 不播连续动画：idle 显示静态海报，互动显示对应动作海报 1.2 秒，拖动显示 drag 海报，特殊动作入口隐藏；状态切换时才预约下一帧。
-- 动画素材不再叠加程序化呼吸、压扁或上抬；内置鲸鱼保持原有程序化效果。
+- idle 在启动时先显示海报帧，再在后台解码并缓存全部帧；缓存按同一比例缩放到 `base.sprite × 2` 以内，不超过 `crop` 原生尺寸，保持 `crop` 宽高比。
+- 其他 clip 不预加载，播放时按顺序解码；解码发生在 UI 线程。
+- 状态机按“拖动 > 用户交互 > 事件/菜单动作 > 困倦 > idle”排序。`enter` 播完进入 `loop`；`loopCount = 0` 直接进入 `exit`，`-1` 持续循环，`> 0` 播完指定遍数后进入 `exit`。步骤在当前动作自然结束后按 delay 链式启动。
+- `idleMotion: bob` 时，`nextDelay` 取当前帧剩余时长与状态帧间隔的较小值：清醒 33 ms、困倦 66 ms、睡着 100 ms；交互 motion 期间 16 ms。没有 `bob` 时回到按帧时长调度。
+- 困倦状态：动作可循环或播放一次。带 clip 的有限动作播完回到 idle；只有无 clip 的 poster-only 动作才在困倦期间保持静态姿势。睡着状态：循环动作持续播放，或显示 poster；未声明时显示 idle 海报。
+- 系统事件接法：更新检查/下载阶段映射 `update.checking`，更新失败映射 `update.failed`；首次启动映射 `intro`，换包映射 `activate`，重置位置映射 `reset`。
+- Reduce Motion 不播连续动画：idle 显示静态海报，交互显示 `reducedPoster` 1.2 秒，拖动显示 drag 状态海报，动作菜单入口隐藏；状态切换时才预约下一帧。
 - 动画时钟仍由 `ui.Context.Now()` 推导；idle 缓存的后台解码是唯一新增的后台工作，它不驱动 UI，完成后由下一次调度帧读取。
 
 ## 非目标
 
-当前增量不包含：`listen` 的产品触发源、`speak` 与气泡时长联动、控制台动作预览页、控制台 zip 导入 UI、随机闲时动作开关、按 clip 单独配置热点、Windows 真机验收。`edge_peek` 目前只作为手动特殊动作，不实现窗口越界探头。
+当前增量不包含：可视化拖拽编辑热区/交互、按 clip 单独配置热点、`listen` 的产品触发源、`speak` 与气泡时长联动、随机闲时动作开关、跨进程导入锁、Windows 真机验收。`edge_peek` 目前只作为手动特殊动作，不实现窗口越界探头。
 
 ## 后续产品项
 
-- 终端用户素材包流程：控制台提供导入 zip、校验预览、启用/切换/删除素材包；导入器合并 zip 内的 `pack.json` 或 `pack.meta.json`/preset，避免用户需要 Go 工具或手改 `settings.json`。当前 `cmd/petpack` 仍只是开发工具，不随安装包分发。
-- 小动作入口：已按试用反馈把六个特殊动作从“小动作”二级菜单移到右键一级菜单；后续再根据实际使用评估最近使用或独立动作面板。
+- 可视化素材编辑器：在控制台里拖拽热区、编辑交互 steps 与 timing，并直接写回 `pack.json`。
+- 预览异步化，避免大包海报生成阻塞控制台 UI。
+- 为 CLI 与控制台增加跨进程文件锁。
+- 自定义气泡样式、音效文件和更多 motion 枚举，需要先定义可验证的封闭集合。
 
 ## 验收
 
@@ -145,35 +186,39 @@
 gofmt -l .
 go vet ./...
 go test ./...
+go test -race ./internal/pet ./internal/petpack ./internal/ui ./internal/settings ./cmd/lucia
 go tool mygo vet .
 ```
 
-`internal/petpack` 覆盖：tiny 动画 WebP 的 ANMF 解析、部分帧、blend/dispose、VP8L 与 lossy ALPH、裁剪缩放、manifest 校验、海报帧、zip 导入、0x7075/GBK 文件名、clip ID 归一化。`internal/pet` 覆盖：内置三帧布局、非方形布局、脸部热区、气泡锚点、静态 View，以及动画 idle 循环、点脸→laugh→idle、拖动链、特殊动作菜单、Reduce Motion 海报。`internal/settings` 覆盖新字段默认值与持久化。
+`internal/petpack` 覆盖：WebP ANMF 解析、部分帧、blend/dispose、VP8L 与 lossy ALPH、裁剪缩放、单一 schema 校验、严格解码、热区顺序与重复 id、交互/菜单/状态/事件/气泡校验、循环动作拒绝、Windows 保留名、内置 id 保留、manifest 海报、zip 导入与 manifest 合并、meta-only 显式生成、Store 安装/同名错误/替换/激活/删除、替换失败回滚、lockfile/pending/backup 恢复、损坏元数据隔离、预览 PNG、0x7075/GBK 文件名、clip ID 归一化。
 
-macOS 真机手工检查（待补验）：
+`internal/pet` 覆盖：素材包布局、缩放、热区、气泡锚点、透明视图、idle 循环、交互 steps、首步 delay、气泡与声音事件、动作停留时序、解码失败自愈、Reduce Motion 海报、idleMotion 帧时钟、菜单声明顺序。
 
-- 内置鲸鱼仍为 248×248，拖动、眨眼、压扁回弹和气泡不回归。
-- 导入 naiwa 后窗口为 248×310，idle 动起来，点脸/摸头/拖动/特殊动作按上述映射播放。
-- 切换四档尺寸时窗口、立绘、脸部热区和气泡锚点同步缩放，底边中点不跳。
-- Reduce Motion 下只显示静态海报，互动海报 1.2 秒，特殊动作入口消失。
-- 素材包删除或损坏后启动退回鲸鱼，日志有明确原因。
-- 气泡靠近屏幕顶部翻到下方时，尾巴仍指向头部。
+`internal/builtinpack` 覆盖：内置包加载、4 帧 idle 与源 PNG 逐字节一致、帧时长、poster 帧。`internal/brand` 覆盖托盘图标。`internal/settings`/`cmd/lucia` 覆盖 Store 并发/失败/字段保留与 fallback active 清理；`internal/ui` 覆盖素材包列表、无效包说明、同名确认、导入后启用、替换 active 失败回退与删除。
+
+macOS 真机手工检查：
+
+- 内置鲸鱼仍为 248×248，拖动、眨眼、呼吸、垂直轻弹和气泡不回归。
+- 导入 naiwa 后窗口为 248×310，idle 动起来，点脸/摸头/拖动/特殊动作按 manifest 播放。
+- 切换四档尺寸时窗口、立绘、热区和气泡锚点同步缩放，底边中点不跳。
+- Reduce Motion 下只显示静态海报，交互海报 1.2 秒，动作菜单入口消失。
+- 素材包删除或损坏后启动退回鲸鱼，控制台不再显示“使用中”。
+- 气泡靠近屏幕顶部翻到下方时，卡片仍与头部保持 12 DIP 间距。
 - 隐藏宠物后不持续解码；重新显示后恢复 idle。
+- CPU 预缩放后的鲸鱼清晰度与旧 GPU 缩放并排对比，确认没有可见退化。
 
 ## 性能观测
 
-2026-10-20 在 Apple M1 Pro、内置 1512×982 与外接 2560×1440 双屏、开发构建下测得内置静态素材：桌宠可见且空闲时，`top` 采样 `%CPU` 约 16–19%，常驻内存约 78–142 MB。当时 `View` 每帧调用 `AnimationFrame()`，会按显示刷新率持续重绘。
+2026-10-20 在 Apple M1 Pro、内置 1512×982 与外接 2560×1440 双屏、开发构建下测得内置静态素材：桌宠可见且空闲时，`top` 采样 `%CPU` 约 16–19%，常驻内存约 78–142 MB。当时 `View` 每帧调用 `AnimationFrame()`。
 
-2026-10-21 改为按状态调度后，在同一台机器和双屏环境下复核：旧构建在 41 分钟空闲时 `ps` 累计约 22.3%；新构建启动后前 5 秒（清醒）`ps` 约 6.1、`top` 约 7.6–8.7%，60 秒后困倦状态 `ps` 约 3.4、`top` 约 5.4%，3 分钟后睡着 `ps` 约 1.8、`top` 约 2–4%，常驻内存约 80–86 MB。隐藏状态实测 `top` 约 0.0–0.1%。
+2026-10-21 改为按状态调度后复核：旧构建 41 分钟空闲 `ps` 累计约 22.3%；新构建前 5 秒（清醒）`ps` 约 6.1、`top` 约 7.6–8.7%，60 秒后困倦 `ps` 约 3.4、`top` 约 5.4%，3 分钟后睡着 `ps` 约 1.8、`top` 约 2–4%，常驻内存约 80–86 MB。隐藏状态 `top` 约 0.0–0.1%。
 
-动画素材包尚未完成真机性能采样。设计目标（Apple M1 Pro，`top` 瞬时值）：清醒 idle `%CPU` ≤ 10%，流式 clip ≤ 25%，睡着 ≤ 3%，隐藏 ≈ 0；驻留内存 ≤ 200 MB；点击到首帧 ≤ 50 ms；1 分钟连续互动丢帧率 < 1%；启动先出海报 < 150 ms，idle 缓存约 0.5–1 秒生成。以上是待验证目标，不是已测结果。
-
-2026-10-24 的一次性 headless 检查（`ui.NewTester`，未打开原生窗口）：`newPetModel` 加载 naiwa（31 个 clip、SHA/元数据校验、海报解码）到首次渲染约 0.5 秒，说明 150 ms 启动目标尚未达到；后续可把非 idle clip 的完整校验移出启动路径。idle 缓存为 379×577×4×96，约 84 MB。
+动画素材包的目标（Apple M1 Pro）：清醒 idle `%CPU` ≤ 10%，流式 clip ≤ 25%，睡着 ≤ 3%，隐藏 ≈ 0；驻留内存 ≤ 200 MB；点击到首帧 ≤ 50 ms；启动先出海报 < 150 ms。以上是待验证目标。
 
 ## 风险与回退
 
-`Panel + Transparent` 的原生 UI 如果出现不透明底色、拖拽异常或焦点被抢，回退为普通 `Frameless + Transparent + AlwaysOnTop + SkipTaskbar` 窗口，并接受“点击会激活应用、可能不覆盖全屏”的代价。透明窗口的整窗命中无法只让非透明像素接收鼠标，因此宠物窗口保持贴合立绘，气泡使用独立窗口并整窗穿透。
+`Panel + Transparent` 的原生 UI 如果出现不透明底色、拖拽异常或焦点被抢，回退为普通 `Frameless + Transparent + AlwaysOnTop + SkipTaskbar` 窗口。
 
-动画素材的回退路径是：`petPack` 为空、素材包缺失、manifest 校验失败、WebP 解码失败或首帧海报生成失败时，记录日志并使用内置鲸鱼。外部素材的授权、体积和平台差异不阻塞内置素材启动。
+素材回退路径：`petPack` 为空、素材包缺失、manifest 校验失败、WebP 解码失败或海报生成失败时，记录日志并使用内置包；启动时清除失效 active。内置包自身加载失败属于构建缺陷，直接失败而不是保留第二套渲染器。
 
 Windows 的透明窗口、纹理上传、拖动检测和高 DPI 缩放仍需真机验证；Linux 不在发布矩阵。`edge_peek` 如果未来要求窗口一部分藏到屏幕外，需要先解决 `KeepOnScreen` 与越界探头的冲突。

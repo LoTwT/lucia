@@ -1,29 +1,17 @@
 package pet
 
 import (
+	"image"
+	"image/color"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 )
 
-func TestBubbleLineCyclesByReaction(t *testing.T) {
-	if got := BubbleLine(ReactionFace, 0); got != faceLines[0] {
-		t.Fatalf("face line 0 = %q, want %q", got, faceLines[0])
-	}
-	if got := BubbleLine(ReactionFace, len(faceLines)); got != faceLines[0] {
-		t.Fatalf("face line wrapped = %q, want %q", got, faceLines[0])
-	}
-	if got := BubbleLine(ReactionHeadPat, 1); got != headPatLines[1] {
-		t.Fatalf("head-pat line 1 = %q, want %q", got, headPatLines[1])
-	}
-	if got := BubbleLine(ReactionNone, 0); got != "" {
-		t.Fatalf("unknown reaction line = %q, want empty", got)
-	}
-}
-
 func TestBubbleViewShowsText(t *testing.T) {
 	m := &BubbleModel{}
-	m.SetContent("别戳脸啦……", BubbleAbove, BubbleWidth/2)
+	m.SetContent("别戳脸啦……", BubbleAbove)
 	tt := ui.NewTester(m.View, BubbleWidth, BubbleHeight)
 	tt.Frame()
 	if !tt.HasText("别戳脸啦……") {
@@ -31,60 +19,75 @@ func TestBubbleViewShowsText(t *testing.T) {
 	}
 }
 
-func TestBubbleTailRendersOnChosenSide(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		side BubbleSide
-		y    int
-	}{
-		{name: "above the pet", side: BubbleAbove, y: 90},
-		{name: "below the pet", side: BubbleBelow, y: 10},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			m := &BubbleModel{}
-			m.SetContent("别戳脸啦……", tt.side, BubbleWidth/2)
-			ttt := ui.NewTester(m.View, BubbleWidth, BubbleHeight)
-			ttt.Frame()
-			img := ttt.Image()
-			if _, _, _, a := img.At(BubbleWidth/2, tt.y).RGBA(); a == 0 {
-				t.Fatalf("tail pixel at (%d,%d) is transparent", BubbleWidth/2, tt.y)
-			}
-		})
+func TestBubbleViewUsesThemePalette(t *testing.T) {
+	m := &BubbleModel{}
+	m.SetContent("摸头……", BubbleAbove)
+
+	light := ui.NewTester(m.View, BubbleWidth, BubbleHeight)
+	light.Frame()
+	assertBubblePixel(t, light.Image(), 25, 70, color.NRGBA{R: 0xFA, G: 0xF6, B: 0xEE, A: 0xF7})
+
+	dark := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(ui.DarkTheme())
+		m.View(c)
+	}, BubbleWidth, BubbleHeight)
+	dark.Frame()
+	assertBubblePixel(t, dark.Image(), 25, 70, color.NRGBA{R: 0x2B, G: 0x27, B: 0x23, A: 0xF7})
+}
+
+func TestBubbleThemeOverridesApp(t *testing.T) {
+	light := &BubbleModel{}
+	light.SetContent("摸头……", BubbleAbove)
+	light.SetTheme(BubbleThemeLight)
+	lightTT := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(ui.DarkTheme())
+		light.View(c)
+	}, BubbleWidth, BubbleHeight)
+	lightTT.Frame()
+	assertBubblePixel(t, lightTT.Image(), 25, 70, color.NRGBA{R: 0xFA, G: 0xF6, B: 0xEE, A: 0xF7})
+
+	dark := &BubbleModel{}
+	dark.SetContent("摸头……", BubbleAbove)
+	dark.SetTheme(BubbleThemeDark)
+	darkTT := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(ui.LightTheme())
+		dark.View(c)
+	}, BubbleWidth, BubbleHeight)
+	darkTT.Frame()
+	assertBubblePixel(t, darkTT.Image(), 25, 70, color.NRGBA{R: 0x2B, G: 0x27, B: 0x23, A: 0xF7})
+}
+
+func TestBubbleHeightFollowsTextLines(t *testing.T) {
+	short := &BubbleModel{}
+	short.SetContent("短句", BubbleAbove)
+	shortTT := ui.NewTester(short.View, BubbleWidth, BubbleHeight)
+	shortTT.Frame()
+
+	long := &BubbleModel{}
+	long.SetContent(strings.Repeat("这是一句很长的台词。", 4), BubbleAbove)
+	longTT := ui.NewTester(long.View, BubbleWidth, BubbleHeight)
+	longTT.Frame()
+
+	shortBounds := opaqueBounds(shortTT.Image())
+	longBounds := opaqueBounds(longTT.Image())
+	if longBounds.Dy() <= shortBounds.Dy()+20 {
+		t.Fatalf("long bubble height = %d, short = %d; want room for wrapped lines", longBounds.Dy(), shortBounds.Dy())
+	}
+	if shortBounds.Dx() != longBounds.Dx() {
+		t.Fatalf("bubble width changed with height: short=%d long=%d", shortBounds.Dx(), longBounds.Dx())
 	}
 }
 
-func TestBubbleTailClampsInsideCard(t *testing.T) {
-	tests := []struct {
-		name   string
-		pet    Rect
-		bubble Rect
-		want   int
-	}{
-		{
-			name:   "left edge",
-			pet:    Rect{X: 0, Width: 248},
-			bubble: Rect{X: 100, Width: BubbleWidth},
-			want:   33,
-		},
-		{
-			name:   "center",
-			pet:    Rect{X: 400, Width: 248},
-			bubble: Rect{X: 404, Width: BubbleWidth},
-			want:   120,
-		},
-		{
-			name:   "right edge",
-			pet:    Rect{X: 1412, Width: 248},
-			bubble: Rect{X: 1172, Width: BubbleWidth},
-			want:   207,
-		},
+func TestBubblePaletteHighContrast(t *testing.T) {
+	light := bubblePaletteFor(false, false)
+	lightContrast := bubblePaletteFor(false, true)
+	if lightContrast.text == light.text || lightContrast.border.A <= light.border.A {
+		t.Fatal("light high-contrast palette must strengthen text and border")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := bubbleTailX(tt.pet, tt.bubble); got != tt.want {
-				t.Fatalf("bubbleTailX = %d, want %d", got, tt.want)
-			}
-		})
+	dark := bubblePaletteFor(true, false)
+	darkContrast := bubblePaletteFor(true, true)
+	if darkContrast.text == dark.text || darkContrast.border.A <= dark.border.A {
+		t.Fatal("dark high-contrast palette must strengthen text and border")
 	}
 }
 
@@ -102,27 +105,24 @@ func TestPlaceBubble(t *testing.T) {
 			name: "above the pet",
 			pet:  Rect{X: 400, Y: 400, Width: 248, Height: 248},
 			want: BubblePlacement{
-				Rect:  Rect{X: 404, Y: 292, Width: BubbleWidth, Height: BubbleHeight},
-				Side:  BubbleAbove,
-				TailX: 120,
+				Rect: Rect{X: 392, Y: 288, Width: BubbleWidth, Height: BubbleHeight},
+				Side: BubbleAbove,
 			},
 		},
 		{
 			name: "below when the work area has no room above",
 			pet:  Rect{X: 400, Y: 33, Width: 248, Height: 248},
 			want: BubblePlacement{
-				Rect:  Rect{X: 404, Y: 289, Width: BubbleWidth, Height: BubbleHeight},
-				Side:  BubbleBelow,
-				TailX: 120,
+				Rect: Rect{X: 392, Y: 277, Width: BubbleWidth, Height: BubbleHeight},
+				Side: BubbleBelow,
 			},
 		},
 		{
 			name: "clamped away from the left dock",
 			pet:  Rect{X: 0, Y: 400, Width: 248, Height: 248},
 			want: BubblePlacement{
-				Rect:  Rect{X: 57, Y: 292, Width: BubbleWidth, Height: BubbleHeight},
-				Side:  BubbleAbove,
-				TailX: 67,
+				Rect: Rect{X: 57, Y: 288, Width: BubbleWidth, Height: BubbleHeight},
+				Side: BubbleAbove,
 			},
 		},
 	}
@@ -132,6 +132,31 @@ func TestPlaceBubble(t *testing.T) {
 				t.Fatalf("PlaceBubble(%+v) = %+v, want %+v", tt.pet, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPlaceBubbleGapUsesCardEdge(t *testing.T) {
+	displays := []Display{{
+		Bounds:   Rect{X: 0, Y: 0, Width: 1512, Height: 982},
+		WorkArea: Rect{X: 57, Y: 33, Width: 1455, Height: 949},
+	}}
+
+	pet := Rect{X: 400, Y: 400, Width: 248, Height: 248}
+	above := PlaceBubble(pet, displays)
+	if above.Side != BubbleAbove {
+		t.Fatalf("side = %v, want above", above.Side)
+	}
+	if cardBottom := above.Y + bubbleAboveShadow + bubbleCardHeight; cardBottom != pet.Y-bubbleGap {
+		t.Fatalf("card bottom = %d, want %d", cardBottom, pet.Y-bubbleGap)
+	}
+
+	pet.Y = 33
+	below := PlaceBubble(pet, displays)
+	if below.Side != BubbleBelow {
+		t.Fatalf("side = %v, want below", below.Side)
+	}
+	if cardTop := below.Y + bubbleBelowShadow; cardTop != pet.Y+pet.Height+bubbleGap {
+		t.Fatalf("card top = %d, want %d", cardTop, pet.Y+pet.Height+bubbleGap)
 	}
 }
 
@@ -148,11 +173,40 @@ func TestPlaceBubbleOnExternalDisplay(t *testing.T) {
 	}
 	pet := Rect{X: 1264, Y: -424, Width: 248, Height: 248}
 	want := BubblePlacement{
-		Rect:  Rect{X: 1268, Y: -532, Width: BubbleWidth, Height: BubbleHeight},
-		Side:  BubbleAbove,
-		TailX: 120,
+		Rect: Rect{X: 1256, Y: -536, Width: BubbleWidth, Height: BubbleHeight},
+		Side: BubbleAbove,
 	}
 	if got := PlaceBubble(pet, displays); got != want {
 		t.Fatalf("PlaceBubble = %+v, want %+v", got, want)
 	}
+}
+
+func assertBubblePixel(t *testing.T, img image.Image, x, y int, want color.NRGBA) {
+	t.Helper()
+	got := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+	close := func(a, b uint8) bool {
+		return a == b || a+1 == b || b+1 == a
+	}
+	if !close(got.R, want.R) || !close(got.G, want.G) || !close(got.B, want.B) || got.A != want.A {
+		t.Fatalf("pixel (%d,%d) = %+v, want %+v (+-1 RGB)", x, y, got, want)
+	}
+}
+
+func opaqueBounds(img image.Image) image.Rectangle {
+	bounds := img.Bounds()
+	out := image.Rectangle{}
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			_, _, _, a := img.At(x, y).RGBA()
+			if a>>8 <= 20 {
+				continue
+			}
+			if out.Empty() {
+				out = image.Rect(x, y, x+1, y+1)
+				continue
+			}
+			out = out.Union(image.Rect(x, y, x+1, y+1))
+		}
+	}
+	return out
 }

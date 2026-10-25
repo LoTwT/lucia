@@ -1,17 +1,22 @@
 package petpack
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image"
 	stddraw "image/draw"
+	"io"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Size is an edge length in pixels or DIPs, depending on the field.
@@ -34,8 +39,8 @@ func (r Rect) ImageRect() image.Rectangle {
 
 func (r Rect) Empty() bool { return r.Width <= 0 || r.Height <= 0 }
 
-// Face is a normalized face hit rectangle relative to the cropped artwork.
-type Face struct {
+// NormalizedRect is a rectangle relative to the cropped artwork.
+type NormalizedRect struct {
 	X      float64 `json:"x"`
 	Y      float64 `json:"y"`
 	Width  float64 `json:"width"`
@@ -64,6 +69,15 @@ type ClipEntry struct {
 	SHA256 string `json:"sha256,omitempty"`
 }
 
+// Timing holds extra pauses after each phase. Frame metadata still decides
+// how long every frame stays visible; these values let a pack add a beat
+// between the authored segments without changing the WebP.
+type Timing struct {
+	EnterHoldMs int `json:"enterHoldMs,omitempty"`
+	LoopHoldMs  int `json:"loopHoldMs,omitempty"`
+	ExitHoldMs  int `json:"exitHoldMs,omitempty"`
+}
+
 // Action maps one user-facing behavior to clip IDs. Enter, Loop and Exit are
 // a chain; Once is a single clip. Poster names a clip and frame for Reduce
 // Motion and is written as "clip#frame".
@@ -74,25 +88,107 @@ type Action struct {
 	Exit          string `json:"exit,omitempty"`
 	Once          string `json:"once,omitempty"`
 	Poster        string `json:"poster,omitempty"`
-	FaceClickable bool   `json:"faceClickable,omitempty"`
+	Interruptible bool   `json:"interruptible,omitempty"`
 	// LoopCount is how many full loop passes precede the exit. Zero skips
-	// the loop, -1 means "until the state ends" (idle and drag).
-	LoopCount int `json:"loopCount,omitempty"`
+	// the loop, -1 means "until the state ends".
+	LoopCount int    `json:"loopCount,omitempty"`
+	Timing    Timing `json:"timing,omitempty"`
 }
 
-// Manifest is the pack.json schema.
+// Hotzone is one normalized clickable rectangle on the cropped artwork.
+// Hotzones are declared in priority order: later entries win overlaps.
+type Hotzone struct {
+	ID          string         `json:"id"`
+	Label       string         `json:"label,omitempty"`
+	Rect        NormalizedRect `json:"rect"`
+	Interaction string         `json:"interaction"`
+}
+
+// Step is one action in an interaction. DelayMs is applied before the step
+// starts, after the previous action finishes.
+type Step struct {
+	Action  string `json:"action"`
+	DelayMs int    `json:"delayMs,omitempty"`
+}
+
+// Interaction is one authored response. Steps may be empty when the pack only
+// supplies host feedback such as a bubble or a bounce/lift motion.
+type Interaction struct {
+	Label         string `json:"label,omitempty"`
+	Steps         []Step `json:"steps,omitempty"`
+	Bubble        string `json:"bubble,omitempty"`
+	Sound         bool   `json:"sound,omitempty"`
+	Motion        string `json:"motion,omitempty"`
+	ReducedPoster string `json:"reducedPoster,omitempty"`
+}
+
+// MenuEntry references either an interaction or a one-shot action.
+type MenuEntry struct {
+	Interaction string `json:"interaction,omitempty"`
+	Action      string `json:"action,omitempty"`
+}
+
+// States maps the host's rest states to authored actions.
+type States struct {
+	Idle   string `json:"idle"`
+	Drag   string `json:"drag,omitempty"`
+	Drowsy string `json:"drowsy,omitempty"`
+	Asleep string `json:"asleep,omitempty"`
+}
+
+// Events maps application events to authored actions.
+type Events struct {
+	Intro          string `json:"intro,omitempty"`
+	Activate       string `json:"activate,omitempty"`
+	Reset          string `json:"reset,omitempty"`
+	UpdateChecking string `json:"update.checking,omitempty"`
+	UpdateFailed   string `json:"update.failed,omitempty"`
+}
+
+// Action returns the action mapped to an application event, or "".
+func (e Events) Action(name string) string {
+	switch name {
+	case "intro":
+		return e.Intro
+	case "activate":
+		return e.Activate
+	case "reset":
+		return e.Reset
+	case "update.checking":
+		return e.UpdateChecking
+	case "update.failed":
+		return e.UpdateFailed
+	default:
+		return ""
+	}
+}
+
+// Manifest is the single pack.json schema. There are no version branches:
+// every pack must declare schema 1 and the current structure.
 type Manifest struct {
-	Schema       int                  `json:"schema"`
-	ID           string               `json:"id"`
-	Name         string               `json:"name"`
-	License      json.RawMessage      `json:"license,omitempty"`
-	Canvas       Size                 `json:"canvas"`
-	Crop         Rect                 `json:"crop"`
-	Base         Base                 `json:"base"`
-	Face         Face                 `json:"face"`
-	BubbleAnchor Anchor               `json:"bubbleAnchor"`
-	Clips        map[string]ClipEntry `json:"clips"`
-	Actions      map[string]Action    `json:"actions"`
+	Schema       int                    `json:"schema"`
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	License      json.RawMessage        `json:"license,omitempty"`
+	Canvas       Size                   `json:"canvas"`
+	Crop         Rect                   `json:"crop"`
+	Base         Base                   `json:"base"`
+	BubbleAnchor Anchor                 `json:"bubbleAnchor"`
+	Clips        map[string]ClipEntry   `json:"clips"`
+	Actions      map[string]Action      `json:"actions"`
+	States       States                 `json:"states"`
+	Events       Events                 `json:"events,omitempty"`
+	Hotzones     []Hotzone              `json:"hotzones,omitempty"`
+	Interactions map[string]Interaction `json:"interactions,omitempty"`
+	Bubbles      map[string][]string    `json:"bubbles,omitempty"`
+	Menu         []MenuEntry            `json:"menu,omitempty"`
+	IdleMotion   string                 `json:"idleMotion,omitempty"`
+}
+
+// HotzoneEntry is a named hotzone in stable display order.
+type HotzoneEntry struct {
+	ID string
+	Hotzone
 }
 
 // Pack is a validated manifest plus its parsed clips.
@@ -107,23 +203,87 @@ type Pack struct {
 
 // Load reads and validates a pack below root/packs/<id>.
 func Load(root, id string, displayScale float64) (*Pack, error) {
-	return loadPackDir(filepath.Join(root, "packs", id), id, displayScale)
+	if IsReservedPackID(id) {
+		return nil, fmt.Errorf("petpack: pack id %q is reserved", id)
+	}
+	return LoadDir(filepath.Join(root, "packs", id), id, displayScale)
 }
 
-// loadPackDir validates a pack from its final directory. Import uses it after
+// LoadDir validates a pack from an explicit directory. It is used by the
+// management store and the check command.
+func LoadDir(dir, id string, displayScale float64) (*Pack, error) {
+	return loadPackFS(os.DirFS(dir), id, displayScale, dir)
+}
+
+// LoadFS validates a pack from any filesystem. The built-in pack uses an
+// embedded FS; installed packs use os.DirFS.
+func LoadFS(fsys fs.FS, id string, displayScale float64) (*Pack, error) {
+	return loadPackFS(fsys, id, displayScale, "")
+}
+
+// ReadManifest parses and validates only the manifest. Management listing
+// uses it so a broken clip does not make an otherwise visible pack vanish.
+func ReadManifest(dir, id string) (Manifest, error) {
+	return ReadManifestFS(os.DirFS(dir), id)
+}
+
+// ReadManifestFS parses and validates only the manifest from a filesystem.
+func ReadManifestFS(fsys fs.FS, id string) (Manifest, error) {
+	if !validPackDirID(id) {
+		return Manifest{}, fmt.Errorf("petpack: invalid pack id %q", id)
+	}
+	if IsReservedPackID(id) {
+		return Manifest{}, fmt.Errorf("petpack: pack id %q is reserved", id)
+	}
+	manifest, err := readManifestFS(fsys, id)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if err := validateManifest(id, manifest); err != nil {
+		return Manifest{}, err
+	}
+	return manifest, nil
+}
+
+func readManifestFS(fsys fs.FS, id string) (Manifest, error) {
+	data, err := fs.ReadFile(fsys, "pack.json")
+	if err != nil {
+		return Manifest{}, fmt.Errorf("petpack %q: read manifest: %w", id, err)
+	}
+	manifest, err := decodeManifest(data)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("petpack %q: parse manifest: %w", id, err)
+	}
+	return manifest, nil
+}
+
+func decodeManifest(data []byte) (Manifest, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var manifest Manifest
+	if err := decoder.Decode(&manifest); err != nil {
+		return Manifest{}, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return Manifest{}, fmt.Errorf("manifest contains more than one JSON value")
+		}
+		return Manifest{}, err
+	}
+	return manifest, nil
+}
+
+// loadPackFS validates a pack from its final filesystem. Import uses it after
 // installing the new directory, without assuming the parent directory is
 // named "packs".
-func loadPackDir(dir, id string, displayScale float64) (*Pack, error) {
-	if !validPackID(id) {
+func loadPackFS(fsys fs.FS, id string, displayScale float64, dir string) (*Pack, error) {
+	if !validPackDirID(id) {
 		return nil, fmt.Errorf("petpack: invalid pack id %q", id)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "pack.json"))
+	manifest, err := readManifestFS(fsys, id)
 	if err != nil {
-		return nil, fmt.Errorf("petpack %q: read manifest: %w", id, err)
-	}
-	var manifest Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("petpack %q: parse manifest: %w", id, err)
+		return nil, err
 	}
 	if err := validateManifest(id, manifest); err != nil {
 		return nil, err
@@ -145,11 +305,10 @@ func loadPackDir(dir, id string, displayScale float64) (*Pack, error) {
 		if entry.File == "" {
 			return nil, fmt.Errorf("petpack %q clip %q: empty file", id, clipID)
 		}
-		path, err := packPath(dir, entry.File)
-		if err != nil {
+		if err := validPackFilePath(entry.File); err != nil {
 			return nil, fmt.Errorf("petpack %q clip %q: %w", id, clipID, err)
 		}
-		clip, err := OpenClip(clipID, path)
+		clip, err := OpenClipFS(clipID, fsys, entry.File)
 		if err != nil {
 			return nil, fmt.Errorf("petpack %q clip %q: %w", id, clipID, err)
 		}
@@ -172,7 +331,8 @@ func loadPackDir(dir, id string, displayScale float64) (*Pack, error) {
 		clip.data = nil // loaded again by each Decoder from clip.path
 		pack.Clips[clipID] = clip
 	}
-	for actionID, action := range manifest.Actions {
+	for _, actionID := range sortedKeys(manifest.Actions) {
+		action := manifest.Actions[actionID]
 		for _, clipID := range actionClips(action) {
 			if clipID != "" {
 				if _, ok := pack.Clips[clipID]; !ok {
@@ -181,8 +341,18 @@ func loadPackDir(dir, id string, displayScale float64) (*Pack, error) {
 			}
 		}
 		if action.Poster != "" {
-			if _, _, err := splitPoster(action.Poster); err != nil {
-				return nil, fmt.Errorf("petpack %q action %q: %w", id, actionID, err)
+			clipID, frame, err := splitPoster(action.Poster)
+			if err != nil {
+				return nil, fmt.Errorf("petpack %q action %q poster: %w", id, actionID, err)
+			}
+			clip, ok := pack.Clips[clipID]
+			if !ok {
+				return nil, fmt.Errorf("petpack %q action %q poster references missing clip %q",
+					id, actionID, clipID)
+			}
+			if frame >= clip.FrameCount() {
+				return nil, fmt.Errorf("petpack %q action %q poster frame %d outside clip %q",
+					id, actionID, frame, clipID)
 			}
 		}
 	}
@@ -227,11 +397,6 @@ func validateManifest(id string, manifest Manifest) error {
 		manifest.Base.Sprite.Height > manifest.Base.Window.Height {
 		return fmt.Errorf("petpack %q: sprite exceeds window", id)
 	}
-	face := manifest.Face
-	if face.Width <= 0 || face.Height <= 0 || face.X < 0 || face.Y < 0 ||
-		face.X+face.Width > 1 || face.Y+face.Height > 1 {
-		return fmt.Errorf("petpack %q: face is not a normalized sub-rectangle", id)
-	}
 	if manifest.BubbleAnchor.X < 0 || manifest.BubbleAnchor.X > 1 ||
 		manifest.BubbleAnchor.Y < 0 || manifest.BubbleAnchor.Y > 1 {
 		return fmt.Errorf("petpack %q: bubble anchor is not normalized", id)
@@ -239,12 +404,300 @@ func validateManifest(id string, manifest Manifest) error {
 	if len(manifest.Clips) == 0 {
 		return fmt.Errorf("petpack %q: no clips", id)
 	}
+	for _, actionID := range sortedKeys(manifest.Actions) {
+		action := manifest.Actions[actionID]
+		if !validPackID(actionID) {
+			return fmt.Errorf("petpack %q: invalid action id %q", id, actionID)
+		}
+		if action.LoopCount < -1 {
+			return fmt.Errorf("petpack %q action %q: loopCount %d", id, actionID, action.LoopCount)
+		}
+		for _, hold := range []struct {
+			name  string
+			value int
+		}{
+			{"enterHoldMs", action.Timing.EnterHoldMs},
+			{"loopHoldMs", action.Timing.LoopHoldMs},
+			{"exitHoldMs", action.Timing.ExitHoldMs},
+		} {
+			if hold.value < 0 || hold.value > 60000 {
+				return fmt.Errorf("petpack %q action %q: %s %d outside 0..60000",
+					id, actionID, hold.name, hold.value)
+			}
+		}
+		for _, clipID := range actionClips(action) {
+			if clipID == "" {
+				continue
+			}
+			if _, ok := manifest.Clips[clipID]; !ok {
+				return fmt.Errorf("petpack %q action %q references missing clip %q", id, actionID, clipID)
+			}
+		}
+		if action.Poster != "" {
+			if err := validatePosterRef(manifest, action.Poster); err != nil {
+				return fmt.Errorf("petpack %q action %q poster: %w", id, actionID, err)
+			}
+		}
+	}
+	if manifest.States.Idle == "" {
+		return fmt.Errorf("petpack %q: states.idle is required", id)
+	}
+	idleAction, ok := manifest.Actions[manifest.States.Idle]
+	if !ok {
+		return fmt.Errorf("petpack %q: states.idle references missing action %q", id, manifest.States.Idle)
+	}
+	if idleAction.Loop == "" || idleAction.LoopCount != -1 {
+		return fmt.Errorf("petpack %q: states.idle action %q must be an infinite loop", id, manifest.States.Idle)
+	}
+	if len(manifest.Hotzones) > 0 && !idleAction.Interruptible {
+		return fmt.Errorf("petpack %q: states.idle action %q must be interruptible when hotzones exist",
+			id, manifest.States.Idle)
+	}
+	for _, state := range []struct {
+		name     string
+		actionID string
+	}{
+		{"drag", manifest.States.Drag},
+		{"drowsy", manifest.States.Drowsy},
+		{"asleep", manifest.States.Asleep},
+	} {
+		if state.actionID == "" {
+			continue
+		}
+		action, ok := manifest.Actions[state.actionID]
+		if !ok {
+			return fmt.Errorf("petpack %q: states.%s references missing action %q", id, state.name, state.actionID)
+		}
+		switch state.name {
+		case "drag":
+			if action.Enter == "" || action.Loop == "" || action.Exit == "" || action.LoopCount != -1 {
+				return fmt.Errorf("petpack %q: states.drag action %q must declare enter, loop and exit with loopCount -1",
+					id, state.actionID)
+			}
+		case "asleep":
+			hasLoop := action.LoopCount < 0 && action.Loop != ""
+			if !hasLoop && action.Poster == "" {
+				return fmt.Errorf("petpack %q: states.asleep action %q must loop or declare a poster",
+					id, state.actionID)
+			}
+		}
+	}
+	for _, event := range []struct {
+		name     string
+		actionID string
+	}{
+		{"intro", manifest.Events.Intro},
+		{"activate", manifest.Events.Activate},
+		{"reset", manifest.Events.Reset},
+		{"update.checking", manifest.Events.UpdateChecking},
+		{"update.failed", manifest.Events.UpdateFailed},
+	} {
+		name, actionID := event.name, event.actionID
+		if actionID == "" {
+			continue
+		}
+		action, ok := manifest.Actions[actionID]
+		if !ok {
+			return fmt.Errorf("petpack %q: events.%s references missing action %q", id, name, actionID)
+		}
+		if err := validateFiniteAction(actionID, action); err != nil {
+			return fmt.Errorf("petpack %q: events.%s: %w", id, name, err)
+		}
+	}
+	switch manifest.IdleMotion {
+	case "", "none", "bob":
+	default:
+		return fmt.Errorf("petpack %q: invalid idleMotion %q", id, manifest.IdleMotion)
+	}
+	if len(manifest.Interactions) > 64 {
+		return fmt.Errorf("petpack %q: more than 64 interactions", id)
+	}
+	for _, interactionID := range sortedKeys(manifest.Interactions) {
+		interaction := manifest.Interactions[interactionID]
+		if !validPackID(interactionID) {
+			return fmt.Errorf("petpack %q: invalid interaction id %q", id, interactionID)
+		}
+		switch interaction.Motion {
+		// "squash" is accepted as a legacy alias for "bounce" so packs
+		// authored against the earlier motion name keep importing.
+		case "", "none", "bounce", "squash", "lift":
+		default:
+			return fmt.Errorf("petpack %q interaction %q: invalid motion %q", id, interactionID, interaction.Motion)
+		}
+		if interaction.Bubble != "" && interaction.Bubble != "none" {
+			lines, ok := manifest.Bubbles[interaction.Bubble]
+			if !ok {
+				return fmt.Errorf("petpack %q interaction %q: missing bubble %q", id, interactionID, interaction.Bubble)
+			}
+			if len(lines) == 0 {
+				return fmt.Errorf("petpack %q interaction %q: bubble %q is empty", id, interactionID, interaction.Bubble)
+			}
+		}
+		if interaction.ReducedPoster != "" {
+			if err := validatePosterRef(manifest, interaction.ReducedPoster); err != nil {
+				return fmt.Errorf("petpack %q interaction %q: reducedPoster: %w", id, interactionID, err)
+			}
+		}
+		if len(interaction.Steps) > 32 {
+			return fmt.Errorf("petpack %q interaction %q: more than 32 steps", id, interactionID)
+		}
+		for i, step := range interaction.Steps {
+			if step.Action == "" {
+				return fmt.Errorf("petpack %q interaction %q step %d: empty action", id, interactionID, i)
+			}
+			action, ok := manifest.Actions[step.Action]
+			if !ok {
+				return fmt.Errorf("petpack %q interaction %q step %d references missing action %q",
+					id, interactionID, i, step.Action)
+			}
+			if err := validateFiniteAction(step.Action, action); err != nil {
+				return fmt.Errorf("petpack %q interaction %q step %d: %w", id, interactionID, i, err)
+			}
+			if step.DelayMs < 0 || step.DelayMs > 60000 {
+				return fmt.Errorf("petpack %q interaction %q step %d: delay %d outside 0..60000",
+					id, interactionID, i, step.DelayMs)
+			}
+		}
+		hasSteps := len(interaction.Steps) > 0
+		hasMotion := interaction.Motion != "" && interaction.Motion != "none"
+		hasBubble := interaction.Bubble != "" && interaction.Bubble != "none"
+		if !hasSteps && !hasMotion && !hasBubble {
+			return fmt.Errorf("petpack %q interaction %q has no effect", id, interactionID)
+		}
+		if !hasSteps && hasMotion && interaction.ReducedPoster == "" {
+			return fmt.Errorf("petpack %q interaction %q: reducedPoster is required for motion-only feedback",
+				id, interactionID)
+		}
+	}
+	for _, bubbleID := range sortedKeys(manifest.Bubbles) {
+		lines := manifest.Bubbles[bubbleID]
+		if !validPackID(bubbleID) {
+			return fmt.Errorf("petpack %q: invalid bubble id %q", id, bubbleID)
+		}
+		if len(lines) > 32 {
+			return fmt.Errorf("petpack %q bubble %q: more than 32 lines", id, bubbleID)
+		}
+		for i, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				return fmt.Errorf("petpack %q bubble %q line %d: empty line", id, bubbleID, i)
+			}
+			if utf8.RuneCountInString(line) > 200 {
+				return fmt.Errorf("petpack %q bubble %q line %d: exceeds 200 characters", id, bubbleID, i)
+			}
+		}
+	}
+	if len(manifest.Hotzones) > 64 {
+		return fmt.Errorf("petpack %q: more than 64 hotzones", id)
+	}
+	seenHotzones := make(map[string]bool, len(manifest.Hotzones))
+	for _, zone := range manifest.Hotzones {
+		if !validPackID(zone.ID) {
+			return fmt.Errorf("petpack %q: invalid hotzone id %q", id, zone.ID)
+		}
+		if seenHotzones[zone.ID] {
+			return fmt.Errorf("petpack %q: duplicate hotzone id %q", id, zone.ID)
+		}
+		seenHotzones[zone.ID] = true
+		if !zone.Rect.Valid() {
+			return fmt.Errorf("petpack %q hotzone %q: rect is not a normalized sub-rectangle", id, zone.ID)
+		}
+		if _, ok := manifest.Interactions[zone.Interaction]; !ok {
+			return fmt.Errorf("petpack %q hotzone %q: missing interaction %q", id, zone.ID, zone.Interaction)
+		}
+	}
+	if len(manifest.Menu) > 32 {
+		return fmt.Errorf("petpack %q: more than 32 menu entries", id)
+	}
+	for i, entry := range manifest.Menu {
+		hasInteraction := entry.Interaction != ""
+		hasAction := entry.Action != ""
+		if hasInteraction == hasAction {
+			return fmt.Errorf("petpack %q menu entry %d: declare exactly one of interaction or action", id, i)
+		}
+		if hasInteraction {
+			interaction, ok := manifest.Interactions[entry.Interaction]
+			if !ok {
+				return fmt.Errorf("petpack %q menu entry %d references missing interaction %q", id, i, entry.Interaction)
+			}
+			if interaction.Label == "" {
+				return fmt.Errorf("petpack %q menu interaction %q: label is required", id, entry.Interaction)
+			}
+			continue
+		}
+		action, ok := manifest.Actions[entry.Action]
+		if !ok {
+			return fmt.Errorf("petpack %q menu entry %d references missing action %q", id, i, entry.Action)
+		}
+		if action.Label == "" {
+			return fmt.Errorf("petpack %q menu action %q: label is required", id, entry.Action)
+		}
+		if err := validateFiniteAction(entry.Action, action); err != nil {
+			return fmt.Errorf("petpack %q menu entry %d: %w", id, i, err)
+		}
+	}
+	return nil
+}
+
+func sortedKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (r NormalizedRect) Valid() bool {
+	return r.Width > 0 && r.Height > 0 && r.X >= 0 && r.Y >= 0 &&
+		r.X+r.Width <= 1 && r.Y+r.Height <= 1
+}
+
+func validatePosterRef(manifest Manifest, poster string) error {
+	clipID, frame, err := splitPoster(poster)
+	if err != nil {
+		return err
+	}
+	clip, ok := manifest.Clips[clipID]
+	if !ok {
+		return fmt.Errorf("missing clip %q", clipID)
+	}
+	if clip.Frames > 0 && frame >= clip.Frames {
+		return fmt.Errorf("frame %d outside clip %q", frame, clipID)
+	}
 	return nil
 }
 
 func actionClips(action Action) []string {
 	return []string{action.Enter, action.Loop, action.Exit, action.Once}
 }
+
+func validateFiniteAction(actionID string, action Action) error {
+	if action.LoopCount < 0 {
+		return fmt.Errorf("action %q loops until interrupted", actionID)
+	}
+	if action.Once == "" && action.Enter == "" && action.Loop == "" && action.Exit == "" {
+		return fmt.Errorf("action %q has no clip", actionID)
+	}
+	return nil
+}
+
+// Interaction returns one interaction by id.
+func (p *Pack) Interaction(id string) (Interaction, bool) {
+	interaction, ok := p.Manifest.Interactions[id]
+	return interaction, ok
+}
+
+// HotzoneList returns hotzones in declaration order. Later entries win
+// overlaps, so this order is also the click priority.
+func (m Manifest) HotzoneList() []HotzoneEntry {
+	out := make([]HotzoneEntry, 0, len(m.Hotzones))
+	for _, zone := range m.Hotzones {
+		out = append(out, HotzoneEntry{ID: zone.ID, Hotzone: zone})
+	}
+	return out
+}
+
+func (p *Pack) HotzoneList() []HotzoneEntry { return p.Manifest.HotzoneList() }
 
 func splitPoster(poster string) (string, int, error) {
 	clipID, frameText, ok := strings.Cut(poster, "#")
@@ -270,13 +723,41 @@ func validPackID(id string) bool {
 	return true
 }
 
-func packPath(dir, name string) (string, error) {
-	path := filepath.Join(dir, filepath.FromSlash(name))
-	rel, err := filepath.Rel(dir, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("path %q escapes the pack directory", name)
+// BuiltinPackID is reserved for the embedded pack. Import, delete and
+// activation never accept it as a user pack id.
+const BuiltinPackID = "lucia-whale"
+
+// IsReservedPackID reports whether id belongs to the built-in pack. The check
+// is case-insensitive because macOS and Windows filesystems usually are.
+func IsReservedPackID(id string) bool {
+	return strings.EqualFold(id, BuiltinPackID)
+}
+
+// validPackDirID requires lowercase ids because pack ids become directory
+// names on case-insensitive filesystems. It also excludes names Windows
+// reserves for devices. Hotzone, interaction and action ids do not become
+// paths and still use validPackID.
+func validPackDirID(id string) bool {
+	return validPackID(id) && id == strings.ToLower(id) && !windowsReservedPackID(id)
+}
+
+func windowsReservedPackID(id string) bool {
+	switch strings.ToLower(id) {
+	case "con", "prn", "aux", "nul":
+		return true
 	}
-	return path, nil
+	lower := strings.ToLower(id)
+	if len(lower) == 4 && (strings.HasPrefix(lower, "com") || strings.HasPrefix(lower, "lpt")) {
+		return lower[3] >= '1' && lower[3] <= '9'
+	}
+	return false
+}
+
+func validPackFilePath(name string) error {
+	if name == "" || !fs.ValidPath(name) {
+		return fmt.Errorf("invalid clip path %q", name)
+	}
+	return nil
 }
 
 // cacheSize fits the crop into the desired sprite box at one uniform scale.
@@ -308,13 +789,18 @@ func (p *Pack) Clip(id string) (*Clip, bool) {
 	return clip, ok
 }
 
-// Poster returns a cached image for an action's poster frame. The clip is
-// decoded from the start and must be walked sequentially.
+// Poster returns an image for an action's poster frame.
 func (p *Pack) Poster(action Action) (image.Image, error) {
 	if action.Poster == "" {
 		return nil, fmt.Errorf("action has no poster")
 	}
-	clipID, frameIndex, err := splitPoster(action.Poster)
+	return p.PosterFrame(action.Poster)
+}
+
+// PosterFrame decodes a "clip#frame" reference. The clip is decoded from the
+// start and must be walked sequentially.
+func (p *Pack) PosterFrame(poster string) (image.Image, error) {
+	clipID, frameIndex, err := splitPoster(poster)
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -30,29 +31,64 @@ type importedClip struct {
 	entry ClipEntry
 }
 
-// ImportOptions controls the metadata written by an import. Base and Face
-// are presentation choices; the clips and crop come from the zip.
+// ImportOptions controls the metadata written by an import. Base is a
+// presentation choice; the clips and crop come from the zip. A pack may
+// carry its own pack.json, which supplies any field left zero here.
 type ImportOptions struct {
 	ID           string
 	Name         string
 	Base         Base
-	Face         Face
 	BubbleAnchor Anchor
 	Force        bool
+	// OnStage reports the import's current stage for crash recovery. It is
+	// called synchronously from ImportZip.
+	OnStage func(string)
 }
 
 // ImportZip converts an animated-WebP zip into packs/<id> and returns the
 // validated pack. The zip is never copied wholesale; only .webp clips are
-// extracted.
+// extracted. A root pack.json or pack.meta.json supplies id, name, geometry,
+// actions, hotzones and interactions; the ClipEntry list is rebuilt from the
+// extracted files.
 func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
+	stage := func(name string) {
+		if opts.OnStage != nil {
+			opts.OnStage(name)
+		}
+	}
+	stage("reading")
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return nil, fmt.Errorf("petpack import: open zip: %w", err)
+	}
+	defer reader.Close()
+	baseManifest, _, err := readZipManifest(reader.File)
+	if err != nil {
+		return nil, fmt.Errorf("petpack import: read manifest: %w", err)
+	}
+	if opts.ID == "" {
+		opts.ID = baseManifest.ID
+	}
+	if opts.ID == "" {
+		opts.ID = idFromZipName(zipPath)
+	}
 	if opts.ID == "" {
 		return nil, fmt.Errorf("petpack import: empty pack id")
 	}
-	if !validPackID(opts.ID) {
+	if !validPackDirID(opts.ID) {
 		return nil, fmt.Errorf("petpack import: invalid pack id %q", opts.ID)
+	}
+	if IsReservedPackID(opts.ID) {
+		return nil, fmt.Errorf("petpack import: %q is reserved for the built-in pack", opts.ID)
+	}
+	if opts.Name == "" {
+		opts.Name = baseManifest.Name
 	}
 	if opts.Name == "" {
 		opts.Name = opts.ID
+	}
+	if opts.BubbleAnchor.X == 0 && opts.BubbleAnchor.Y == 0 {
+		opts.BubbleAnchor = baseManifest.BubbleAnchor
 	}
 	if opts.BubbleAnchor.X == 0 && opts.BubbleAnchor.Y == 0 {
 		opts.BubbleAnchor = Anchor{X: 0.5, Y: 0.05}
@@ -60,11 +96,7 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	if err := os.MkdirAll(packsRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("petpack import: create packs directory: %w", err)
 	}
-	reader, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return nil, fmt.Errorf("petpack import: open zip: %w", err)
-	}
-	defer reader.Close()
+	stage("extracting")
 
 	tmp, err := os.MkdirTemp(packsRoot, ".import-"+opts.ID+"-")
 	if err != nil {
@@ -154,24 +186,71 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	}
 	crop = crop.Inset(-2).Intersect(image.Rect(0, 0, canvas.Width, canvas.Height))
 
+	base := opts.Base
+	if base.Window.Width == 0 && base.Window.Height == 0 {
+		base = baseManifest.Base
+	}
+	if base.Window.Width <= 0 || base.Window.Height <= 0 ||
+		base.Sprite.Width <= 0 || base.Sprite.Height <= 0 {
+		return nil, fmt.Errorf("petpack import: base window and sprite sizes are required")
+	}
+	actions := baseManifest.Actions
+	generatedActions := len(actions) == 0
+	if generatedActions {
+		actions = buildActions(imported)
+	}
+	states := baseManifest.States
+	if states.Idle == "" {
+		generated := buildStates(actions)
+		states.Idle = generated.Idle
+		if states.Drag == "" {
+			states.Drag = generated.Drag
+		}
+		if states.Drowsy == "" {
+			states.Drowsy = generated.Drowsy
+		}
+		if states.Asleep == "" {
+			states.Asleep = generated.Asleep
+		}
+	}
+	events := baseManifest.Events
+	menu := baseManifest.Menu
+	if generatedActions {
+		events = buildEvents(actions)
+		menu = buildMenu(actions)
+	}
 	manifest := Manifest{
 		Schema:  1,
 		ID:      opts.ID,
 		Name:    opts.Name,
-		License: json.RawMessage(`{"status":"local-only","note":"imported by the user; not distributed with Lucia"}`),
+		License: baseManifest.License,
 		Canvas:  canvas,
 		Crop: Rect{
 			X: crop.Min.X, Y: crop.Min.Y, Width: crop.Dx(), Height: crop.Dy(),
 		},
-		Base:         opts.Base,
-		Face:         opts.Face,
+		Base:         base,
 		BubbleAnchor: opts.BubbleAnchor,
 		Clips:        make(map[string]ClipEntry, len(imported)),
-		Actions:      buildActions(imported),
+		Actions:      actions,
+		States:       states,
+		Events:       events,
+		Hotzones:     baseManifest.Hotzones,
+		Interactions: baseManifest.Interactions,
+		Bubbles:      baseManifest.Bubbles,
+		Menu:         menu,
+		IdleMotion:   baseManifest.IdleMotion,
 	}
 	for id, item := range imported {
-		manifest.Clips[id] = item.entry
+		entry := item.entry
+		if old, ok := baseManifest.Clips[id]; ok {
+			entry.Loop = old.Loop
+		}
+		manifest.Clips[id] = entry
 	}
+	if err := validateManifest(opts.ID, manifest); err != nil {
+		return nil, fmt.Errorf("petpack import: %w", err)
+	}
+	stage("installing")
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("petpack import: encode manifest: %w", err)
@@ -219,7 +298,8 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		return nil, fmt.Errorf("petpack import: install %q: %w", final, err)
 	}
 	// The deferred cleanup now finds nothing at tmp; final is validated below.
-	pack, err := loadPackDir(final, opts.ID, 1)
+	stage("validating")
+	pack, err := LoadDir(final, opts.ID, 1)
 	if err != nil {
 		if rollbackErr := restore(); rollbackErr != nil {
 			return nil, fmt.Errorf("petpack import: validate installed pack: %w; rollback failed: %v", err, rollbackErr)
@@ -332,9 +412,9 @@ func buildActions(imported map[string]importedClip) map[string]Action {
 		return ok
 	}
 	actions := make(map[string]Action)
-	addChain := func(id, label string, loopCount int, faceClickable bool) {
+	addChain := func(id, label string, loopCount int, interruptible bool) {
 		enter, loop, exit := id+"_enter", id+"_loop", id+"_exit"
-		action := Action{Label: label, FaceClickable: faceClickable}
+		action := Action{Label: label, Interruptible: interruptible}
 		if has(enter) {
 			action.Enter = enter
 		}
@@ -357,7 +437,7 @@ func buildActions(imported map[string]importedClip) map[string]Action {
 		actions[id] = action
 	}
 	if has("idle_loop") {
-		actions["idle"] = Action{Label: "待机", Loop: "idle_loop", Poster: "idle_loop#0", FaceClickable: true, LoopCount: -1}
+		actions["idle"] = Action{Label: "待机", Loop: "idle_loop", Poster: "idle_loop#0", Interruptible: true, LoopCount: -1}
 	}
 	addChain("happy", "开心", 0, true)
 	addChain("laugh", "大笑", 0, true)
@@ -398,4 +478,122 @@ func buildActions(imported map[string]importedClip) map[string]Action {
 		}
 	}
 	return actions
+}
+
+func buildStates(actions map[string]Action) States {
+	states := States{Idle: "idle"}
+	if _, ok := actions["drag"]; ok {
+		states.Drag = "drag"
+	}
+	if _, ok := actions["sleep_denial"]; ok {
+		states.Drowsy = "sleep_denial"
+	}
+	return states
+}
+
+func buildEvents(actions map[string]Action) Events {
+	events := Events{}
+	if _, ok := actions["wave"]; ok {
+		events.Intro = "wave"
+		events.Activate = "wave"
+		events.Reset = "wave"
+	}
+	if _, ok := actions["think"]; ok {
+		events.UpdateChecking = "think"
+	}
+	if _, ok := actions["sad"]; ok {
+		events.UpdateFailed = "sad"
+	}
+	return events
+}
+
+func buildMenu(actions map[string]Action) []MenuEntry {
+	order := []string{"belly_taunt", "pretend_deaf", "smug_stumble", "sleep_denial", "play_innocent", "edge_peek"}
+	var entries []MenuEntry
+	seen := make(map[string]bool, len(order))
+	for _, id := range order {
+		action, ok := actions[id]
+		if ok && action.Once != "" && action.Label != "" {
+			entries = append(entries, MenuEntry{Action: id})
+			seen[id] = true
+		}
+	}
+	var rest []string
+	for id, action := range actions {
+		if seen[id] || action.Once == "" || action.Label == "" {
+			continue
+		}
+		rest = append(rest, id)
+	}
+	sort.Strings(rest)
+	for _, id := range rest {
+		entries = append(entries, MenuEntry{Action: id})
+	}
+	return entries
+}
+
+// ReadZipManifest inspects a pack zip without extracting artwork. It returns
+// the manifest as authored so the importer can build actions first and then
+// fill the generated states, events and menu from them.
+func ReadZipManifest(zipPath string) (Manifest, bool, error) {
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return Manifest{}, false, fmt.Errorf("petpack: open zip: %w", err)
+	}
+	defer reader.Close()
+	return readZipManifest(reader.File)
+}
+
+func readZipManifest(files []*zip.File) (Manifest, bool, error) {
+	entry := findManifestEntry(files, "pack.json")
+	if entry == nil {
+		entry = findManifestEntry(files, "pack.meta.json")
+	}
+	if entry == nil {
+		return Manifest{}, false, nil
+	}
+	const limit = 4 << 20
+	if entry.UncompressedSize64 > limit {
+		return Manifest{}, true, fmt.Errorf("%s exceeds the 4 MiB manifest limit", entry.Name)
+	}
+	reader, err := entry.Open()
+	if err != nil {
+		return Manifest{}, true, fmt.Errorf("open %s: %w", entry.Name, err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return Manifest{}, true, fmt.Errorf("read %s: %w", entry.Name, err)
+	}
+	if len(data) > limit {
+		return Manifest{}, true, fmt.Errorf("%s exceeds the 4 MiB manifest limit", entry.Name)
+	}
+	manifest, err := decodeManifest(data)
+	if err != nil {
+		return Manifest{}, true, fmt.Errorf("parse %s: %w", entry.Name, err)
+	}
+	if manifest.Schema != 1 {
+		return Manifest{}, true, fmt.Errorf("%s: schema %d, want 1", entry.Name, manifest.Schema)
+	}
+	return manifest, true, nil
+}
+
+func findManifestEntry(files []*zip.File, name string) *zip.File {
+	var best *zip.File
+	bestDepth := 1 << 30
+	for _, file := range files {
+		if file.FileInfo().IsDir() || isMacMetadata(file.Name) {
+			continue
+		}
+		clean := path.Clean(zipEntryName(file))
+		if clean != name && !strings.HasSuffix(clean, "/"+name) {
+			continue
+		}
+		depth := strings.Count(clean, "/")
+		if best == nil || depth < bestDepth {
+			best = file
+			bestDepth = depth
+		}
+	}
+	return best
 }

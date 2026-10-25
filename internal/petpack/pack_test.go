@@ -138,7 +138,6 @@ func TestImportZip(t *testing.T) {
 		ID:   "tiny",
 		Name: "Tiny",
 		Base: Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
-		Face: Face{X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -154,10 +153,38 @@ func TestImportZip(t *testing.T) {
 	}
 }
 
+func TestImportZipInfersIDFromFilename(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "tiny.zip")
+	writeTinyZip(t, zipPath)
+	pack, err := ImportZip(zipPath, filepath.Join(dir, "packs"), ImportOptions{
+		Base: Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pack.Manifest.ID != "tiny" {
+		t.Fatalf("inferred id = %q, want tiny", pack.Manifest.ID)
+	}
+}
+
 func TestInvalidPackID(t *testing.T) {
 	for _, id := range []string{"", ".", "..", "../escape", "a/b", `a\b`, "a b"} {
 		if _, err := Load(t.TempDir(), id, 1); err == nil {
 			t.Errorf("Load accepted invalid id %q", id)
+		}
+	}
+}
+
+func TestPackDirectoryIDsAreLowercase(t *testing.T) {
+	for _, id := range []string{"tiny-pack", "pack_2"} {
+		if !validPackDirID(id) {
+			t.Errorf("validPackDirID(%q) = false", id)
+		}
+	}
+	for _, id := range []string{"Tiny", "TINY", "Pack_2"} {
+		if validPackDirID(id) {
+			t.Errorf("validPackDirID accepted mixed-case id %q", id)
 		}
 	}
 }
@@ -263,6 +290,24 @@ func TestCacheSizePreservesCropAspect(t *testing.T) {
 	}
 }
 
+func TestLoadFSUsesTheGivenFilesystem(t *testing.T) {
+	dir := writeTinyPack(t)
+	packDir := filepath.Join(dir, "packs", "tiny")
+	pack, err := LoadFS(os.DirFS(packDir), "tiny", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := pack.Clip("idle_loop"); !ok {
+		t.Fatal("LoadFS did not load idle_loop")
+	}
+	if _, err := ReadManifestFS(os.DirFS(packDir), "tiny"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadManifestFS(os.DirFS(dir), "tiny"); err == nil {
+		t.Fatal("ReadManifestFS found a manifest outside the pack filesystem")
+	}
+}
+
 func TestClipDetectsFileReplacedAfterLoad(t *testing.T) {
 	dir := writeTinyPack(t)
 	pack, err := Load(dir, "tiny", 2)
@@ -270,7 +315,8 @@ func TestClipDetectsFileReplacedAfterLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	clip := pack.Clips["idle_loop"]
-	if err := os.WriteFile(clip.path, []byte("different bytes"), 0o644); err != nil {
+	clipPath := filepath.Join(dir, "packs", "tiny", filepath.FromSlash(clip.name))
+	if err := os.WriteFile(clipPath, []byte("different bytes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := clip.NewDecoder(); err == nil || !strings.Contains(err.Error(), "changed on disk") {
@@ -345,7 +391,6 @@ func TestImportRequiresIdleLoop(t *testing.T) {
 	_, err = ImportZip(zipPath, filepath.Join(dir, "packs"), ImportOptions{
 		ID: "no-idle", Name: "No idle",
 		Base: Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
-		Face: Face{X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5},
 	})
 	if err == nil || !strings.Contains(err.Error(), "idle_loop") {
 		t.Fatalf("ImportZip error = %v, want missing idle_loop error", err)
@@ -378,14 +423,14 @@ func writeTinyPack(t *testing.T) string {
 		Canvas:       Size{Width: 16, Height: 16},
 		Crop:         Rect{Width: 16, Height: 16},
 		Base:         Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
-		Face:         Face{X: 0.25, Y: 0.25, Width: 0.5, Height: 0.5},
 		BubbleAnchor: Anchor{X: 0.5, Y: 0.1},
 		Clips: map[string]ClipEntry{
 			"idle_loop": {File: "clips/idle_loop.webp", Frames: 3, Loop: true},
 		},
 		Actions: map[string]Action{
-			"idle": {Loop: "idle_loop", Poster: "idle_loop#0", FaceClickable: true, LoopCount: -1},
+			"idle": {Loop: "idle_loop", Poster: "idle_loop#0", Interruptible: true, LoopCount: -1},
 		},
+		States: States{Idle: "idle"},
 	}
 	body, err := json.Marshal(manifest)
 	if err != nil {
