@@ -146,10 +146,8 @@ func (m *Model) packRow(c *ui.Context, pack PackSummary) {
 				}
 			}
 			if !pack.Active && m.cfg.DeletePack != nil {
-				if ui.Button(c, "删除").Clicked() {
-					if m.cfg.ConfirmDeletePack == nil || m.cfg.ConfirmDeletePack(pack.ID, pack.Name) {
-						m.deletePack(pack.ID)
-					}
+				if ui.Button(c, "删除").Disabled(m.packBusy).Clicked() {
+					m.confirmDeletePack(pack.ID, pack.Name)
 				}
 			}
 		})
