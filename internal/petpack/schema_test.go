@@ -27,6 +27,10 @@ func TestManifestValidation(t *testing.T) {
 			m.States.Asleep = "happy"
 			m.Actions["happy"] = Action{Once: "idle_loop", LoopCount: 0}
 		}, "must loop or declare a poster"},
+		{"asleep loop needs a clip", func(m *Manifest) {
+			m.States.Asleep = "happy"
+			m.Actions["happy"] = Action{LoopCount: -1}
+		}, "must loop or declare a poster"},
 		{"drag structure", func(m *Manifest) { m.States.Drag = "happy" }, "must declare enter, loop and exit"},
 		{"action poster", func(m *Manifest) {
 			action := m.Actions["happy"]
@@ -68,6 +72,13 @@ func TestManifestValidation(t *testing.T) {
 			m.Actions["plain"] = Action{Once: "idle_loop"}
 			m.Menu = []MenuEntry{{Action: "plain"}}
 		}, "label is required"},
+		{"menu interaction label", func(m *Manifest) {
+			m.Interactions["plain"] = Interaction{Bubble: "face"}
+			m.Menu = []MenuEntry{{Interaction: "plain"}}
+		}, "label is required"},
+		{"empty bubble", func(m *Manifest) {
+			m.Bubbles["face"] = []string{}
+		}, "bubble \"face\" is empty"},
 		{"bubble empty line", func(m *Manifest) {
 			m.Bubbles["face"] = []string{""}
 		}, "empty line"},
@@ -174,6 +185,9 @@ func TestReadManifestRejectsReservedID(t *testing.T) {
 	if _, err := ReadManifest(filepath.Join(dir, "packs", "tiny"), BuiltinPackID); err == nil ||
 		!strings.Contains(err.Error(), "reserved") {
 		t.Fatalf("ReadManifest error = %v, want reserved id error", err)
+	}
+	if _, err := Load(dir, BuiltinPackID, 1); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("Load error = %v, want reserved id error", err)
 	}
 }
 

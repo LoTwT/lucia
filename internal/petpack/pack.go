@@ -203,6 +203,9 @@ type Pack struct {
 
 // Load reads and validates a pack below root/packs/<id>.
 func Load(root, id string, displayScale float64) (*Pack, error) {
+	if IsReservedPackID(id) {
+		return nil, fmt.Errorf("petpack: pack id %q is reserved", id)
+	}
 	return LoadDir(filepath.Join(root, "packs", id), id, displayScale)
 }
 
@@ -338,8 +341,18 @@ func loadPackFS(fsys fs.FS, id string, displayScale float64, dir string) (*Pack,
 			}
 		}
 		if action.Poster != "" {
-			if err := validatePosterRef(manifest, action.Poster); err != nil {
+			clipID, frame, err := splitPoster(action.Poster)
+			if err != nil {
 				return nil, fmt.Errorf("petpack %q action %q poster: %w", id, actionID, err)
+			}
+			clip, ok := pack.Clips[clipID]
+			if !ok {
+				return nil, fmt.Errorf("petpack %q action %q poster references missing clip %q",
+					id, actionID, clipID)
+			}
+			if frame >= clip.FrameCount() {
+				return nil, fmt.Errorf("petpack %q action %q poster frame %d outside clip %q",
+					id, actionID, frame, clipID)
 			}
 		}
 	}
@@ -462,7 +475,8 @@ func validateManifest(id string, manifest Manifest) error {
 					id, state.actionID)
 			}
 		case "asleep":
-			if action.LoopCount >= 0 && action.Poster == "" {
+			hasLoop := action.LoopCount < 0 && action.Loop != ""
+			if !hasLoop && action.Poster == "" {
 				return fmt.Errorf("petpack %q: states.asleep action %q must loop or declare a poster",
 					id, state.actionID)
 			}
@@ -509,8 +523,12 @@ func validateManifest(id string, manifest Manifest) error {
 			return fmt.Errorf("petpack %q interaction %q: invalid motion %q", id, interactionID, interaction.Motion)
 		}
 		if interaction.Bubble != "" && interaction.Bubble != "none" {
-			if _, ok := manifest.Bubbles[interaction.Bubble]; !ok {
+			lines, ok := manifest.Bubbles[interaction.Bubble]
+			if !ok {
 				return fmt.Errorf("petpack %q interaction %q: missing bubble %q", id, interactionID, interaction.Bubble)
+			}
+			if len(lines) == 0 {
+				return fmt.Errorf("petpack %q interaction %q: bubble %q is empty", id, interactionID, interaction.Bubble)
 			}
 		}
 		if interaction.ReducedPoster != "" {
@@ -595,8 +613,12 @@ func validateManifest(id string, manifest Manifest) error {
 			return fmt.Errorf("petpack %q menu entry %d: declare exactly one of interaction or action", id, i)
 		}
 		if hasInteraction {
-			if _, ok := manifest.Interactions[entry.Interaction]; !ok {
+			interaction, ok := manifest.Interactions[entry.Interaction]
+			if !ok {
 				return fmt.Errorf("petpack %q menu entry %d references missing interaction %q", id, i, entry.Interaction)
+			}
+			if interaction.Label == "" {
+				return fmt.Errorf("petpack %q menu interaction %q: label is required", id, entry.Interaction)
 			}
 			continue
 		}

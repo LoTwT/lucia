@@ -188,6 +188,27 @@ func TestTriggerEventUsesManifestMapping(t *testing.T) {
 	}
 }
 
+func TestLoopingAsleepKeepsAdvancing(t *testing.T) {
+	m, pack := newTinyAnimatedModel(t)
+	pack.Manifest.Actions["asleep_loop"] = petpack.Action{
+		Label: "睡着", Loop: "idle_loop", Poster: "idle_loop#0", LoopCount: -1,
+	}
+	pack.Manifest.States.Asleep = "asleep_loop"
+	width, height := m.WindowSize()
+	tt := ui.NewTester(m.View, width, height)
+	tt.Frame()
+	tt.Advance(asleepAfter)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.actionID != "asleep_loop" {
+		t.Fatalf("current = %+v, want the looping asleep action", m.animated.current)
+	}
+	tt.Advance(50 * time.Millisecond)
+	tt.Frame()
+	if m.animated.current == nil || m.animated.current.frame != 1 {
+		t.Fatalf("current = %+v, want asleep frame 1", m.animated.current)
+	}
+}
+
 func TestFiniteDrowsyReturnsToIdle(t *testing.T) {
 	m, _ := newTinyAnimatedModel(t)
 	width, height := m.WindowSize()

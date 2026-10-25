@@ -157,19 +157,25 @@ func (m *Model) TriggerInteraction(id string) {
 }
 
 func (m *Model) showBubble(interaction petpack.Interaction) {
-	if m.onBubble == nil || interaction.Bubble == "" || interaction.Bubble == "none" {
+	if m.onBubble == nil {
 		return
 	}
-	lines := m.animated.pack.Manifest.Bubbles[interaction.Bubble]
-	if len(lines) == 0 {
+	var text string
+	if interaction.Bubble != "" && interaction.Bubble != "none" {
+		lines := m.animated.pack.Manifest.Bubbles[interaction.Bubble]
+		if len(lines) > 0 {
+			if m.bubbleSeq == nil {
+				m.bubbleSeq = make(map[string]int)
+			}
+			index := m.bubbleSeq[interaction.Bubble] % len(lines)
+			m.bubbleSeq[interaction.Bubble]++
+			text = lines[index]
+		}
+	}
+	if text == "" && !interaction.Sound {
 		return
 	}
-	if m.bubbleSeq == nil {
-		m.bubbleSeq = make(map[string]int)
-	}
-	index := m.bubbleSeq[interaction.Bubble] % len(lines)
-	m.bubbleSeq[interaction.Bubble]++
-	m.onBubble(BubbleEvent{Text: lines[index], Sound: interaction.Sound})
+	m.onBubble(BubbleEvent{Text: text, Sound: interaction.Sound})
 }
 
 // HasEvent reports whether the current pack maps an application event.

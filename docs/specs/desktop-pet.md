@@ -39,11 +39,11 @@
 ## 交互与热区
 
 - 热区由 manifest 的 `hotzones` 有序数组声明。每项 `{id, label, rect, interaction}`，`rect` 归一化到 `crop`；数组顺序就是重叠优先级，后声明者优先命中。
-- interact 由 `interactions` 声明：`{label, steps, bubble, sound, motion, reducedPoster}`。`steps` 可为空；此时通过气泡、声音或 `motion` 提供反馈。`motion` 取 `none`、`squash`、`lift`。
+- interact 由 `interactions` 声明：`{label, steps, bubble, sound, motion, reducedPoster}`。`steps` 可为空；此时通过气泡、声音或 `motion` 提供反馈。`motion` 取 `none`、`squash`、`lift`。`sound` 独立于气泡：`bubble: none` 时仍可播放声音。
 - `squash` 是 450 ms 压扁回弹；`lift` 是 620 ms、幅度更小并带轻微上抬。变换原点为底部中心，窗口位置不动。
 - `steps` 每项 `{action, delayMs}`。第一步的 `delayMs` 从触发时开始等待，后续步骤的 `delayMs` 在上一步结束后等待；上限 60000 ms。等待期间继续播放 idle。
 - 动作播放期间是否接受热区点击由动作的 `interruptible` 决定。声明了热区时，`states.idle` 指向的动作必须为 `interruptible: true`。
-- 右键菜单由 manifest 的 `menu` 声明：每项引用一个 `interaction` 或一个有限 `action`。宿主固定的“桌宠设置 / 隐藏宠物 / 重置位置”永远在分隔线下方。
+- 右键菜单由 manifest 的 `menu` 声明：每项引用一个 `interaction` 或一个有限 `action`，两者都必须有非空 `label`。宿主固定的“桌宠设置 / 隐藏宠物 / 重置位置”永远在分隔线下方。
 - 内置鲸鱼的“摸摸脸”是 `poke` 交互，“摸摸头”是 `pat` 交互；两者都只有气泡、声音和 `motion`，不播放额外 clip。外部包可以用 `steps` 播放任意有限动作。
 - 拖动、特殊动作和 Reduce Motion 会清空未开始的步骤。拖动期间热区不可点击。
 - Reduce Motion 下不播放连续动画：idle 显示海报，交互显示 `reducedPoster` 1.2 秒，状态切换时才预约下一帧。

@@ -254,6 +254,20 @@ func TestFirstStepDelayKeepsIdleAlive(t *testing.T) {
 	}
 }
 
+func TestSoundOnlyInteractionEmitsFeedback(t *testing.T) {
+	m, pack := newInteractionModel(t)
+	pack.Manifest.Interactions["pat"] = petpack.Interaction{
+		Label: "摸摸头", Bubble: "none", Sound: true, Motion: "squash",
+		ReducedPoster: "idle_loop#1",
+	}
+	var events []BubbleEvent
+	m.SetBubbleHandler(func(event BubbleEvent) { events = append(events, event) })
+	m.TriggerHotzone("head")
+	if len(events) != 1 || events[0].Text != "" || !events[0].Sound {
+		t.Fatalf("feedback = %+v, want an empty-text sound event", events)
+	}
+}
+
 func TestMotionOnlyInteractionKeepsCurrentClip(t *testing.T) {
 	m, pack := newInteractionModel(t)
 	pack.Manifest.Interactions["pat"] = petpack.Interaction{

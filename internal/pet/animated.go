@@ -558,6 +558,9 @@ func (a *animatedModel) sync(now time.Time, activity Activity, idle time.Duratio
 		a.asleep = false
 		if a.current != nil && (a.current.actionID == a.pack.Manifest.States.Drowsy ||
 			a.current.actionID == a.pack.Manifest.States.Asleep) {
+			if a.current.provider != nil {
+				a.current.provider.Close()
+			}
 			a.current = nil
 		}
 	}
@@ -611,12 +614,17 @@ func (a *animatedModel) holdStatePoster(actionID string) bool {
 }
 
 func (a *animatedModel) enterAsleep(now time.Time) {
+	id := a.pack.Manifest.States.Asleep
+	if id != "" && a.current != nil && a.current.actionID == id {
+		a.asleep = true
+		a.advance(now)
+		return
+	}
 	if a.current != nil && a.current.provider != nil {
 		a.current.provider.Close()
 	}
 	a.current = nil
 	a.asleep = true
-	id := a.pack.Manifest.States.Asleep
 	if id == "" {
 		return
 	}
@@ -627,8 +635,8 @@ func (a *animatedModel) enterAsleep(now time.Time) {
 	if action.LoopCount < 0 && action.Loop != "" {
 		if a.startAction(id, now) {
 			a.advance(now)
+			return
 		}
-		return
 	}
 	if action.Poster != "" {
 		a.restPoster = a.posterFor(id)
@@ -829,9 +837,6 @@ func (a *animatedModel) nextDelay(now time.Time, activity Activity, idle time.Du
 			return interval
 		}
 		return base
-	}
-	if a.asleep {
-		return 0
 	}
 	return base
 }

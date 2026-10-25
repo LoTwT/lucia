@@ -327,6 +327,9 @@ func main() {
 			if prefs.SoundEnabled && event.Sound {
 				playPetSound(petSound)
 			}
+			if event.Text == "" {
+				return
+			}
 			now := time.Now()
 			if !bubbleAllowed(now, lastBubble, prefs.BubbleCooldownSeconds) {
 				return
@@ -356,12 +359,14 @@ func main() {
 		configurePetModel(next)
 		oldID := prefs.PetPack
 		if err := packStore.SetActive(id); err != nil {
+			next.Close()
 			return err
 		}
 		updated, err := settingsStore.Update(func(s *settings.Settings) {
 			s.PetPack = id
 		})
 		if err != nil {
+			next.Close()
 			_ = packStore.SetActive(oldID)
 			return err
 		}
