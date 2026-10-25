@@ -163,6 +163,24 @@ func TestImportPackNeedsNoLicenseGate(t *testing.T) {
 	}
 }
 
+func TestPacksPageShowsImportPanelWithAsyncInstaller(t *testing.T) {
+	model := New(Config{
+		Version:            "0.0.1",
+		DataDir:            "/tmp/lucia",
+		Updates:            updates.New(disabledSource{}, "0.0.1"),
+		Settings:           settings.Default(),
+		ChoosePackZipAsync: func(func(string, error)) {},
+		InstallPackAsync:   func(string, bool, func(PackSummary, error)) {},
+	})
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("素材包"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("导入并启用") {
+		t.Fatalf("async installer did not render the import panel; texts: %v", tt.Texts())
+	}
+}
+
 func TestImportPackAsyncKeepsBusyUntilCompletion(t *testing.T) {
 	model, imports, activations := newPacksTestModel(t, nil)
 	var done func(PackSummary, error)
@@ -182,6 +200,41 @@ func TestImportPackAsyncKeepsBusyUntilCompletion(t *testing.T) {
 	done(testPack(true), nil)
 	if model.packBusy || *activations != 1 {
 		t.Fatalf("busy=%v activations=%d", model.packBusy, *activations)
+	}
+}
+
+func TestImportPackAsyncConfirmsReplacement(t *testing.T) {
+	model, _, activations := newPacksTestModel(t, []PackSummary{testPack(true)})
+	var completions []func(PackSummary, error)
+	model.cfg.InstallPackAsync = func(_ string, _ bool, callback func(PackSummary, error)) {
+		completions = append(completions, callback)
+	}
+	model.cfg.ConfirmReplacePackAsync = func(_, _ string, done func(bool)) { done(true) }
+	model.packZip = "tiny.zip"
+
+	model.importPack()
+	if len(completions) != 1 || !model.packBusy {
+		t.Fatalf("completions=%d busy=%v", len(completions), model.packBusy)
+	}
+	completions[0](PackSummary{}, &PackExistsError{ID: "tiny", Name: "Tiny"})
+	if len(completions) != 2 || !model.packBusy {
+		t.Fatalf("replace completions=%d busy=%v", len(completions), model.packBusy)
+	}
+	completions[1](testPack(true), nil)
+	if model.packBusy || *activations != 1 {
+		t.Fatalf("busy=%v activations=%d", model.packBusy, *activations)
+	}
+}
+
+func TestImportPackAsyncErrorClearsBusy(t *testing.T) {
+	model, _, activations := newPacksTestModel(t, nil)
+	model.cfg.InstallPackAsync = func(_ string, _ bool, callback func(PackSummary, error)) {
+		callback(PackSummary{}, errors.New("boom"))
+	}
+	model.packZip = "tiny.zip"
+	model.importPack()
+	if model.packBusy || *activations != 0 || model.packActionErr == "" {
+		t.Fatalf("busy=%v activations=%d err=%q", model.packBusy, *activations, model.packActionErr)
 	}
 }
 

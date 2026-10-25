@@ -87,7 +87,7 @@ func (m *Model) packsPage(c *ui.Context) {
 				ui.Text(c, "素材包只安装在本机数据目录，不进入仓库、CI 或安装包。").
 					FontSize(12).TextColor(t.TextMuted)
 			})
-			if ui.Button(c, "刷新").Clicked() {
+			if ui.Button(c, "刷新").Disabled(m.packBusy).Clicked() {
 				m.packsLoaded = false
 				m.packPreviewID = ""
 				m.packActionErr = ""
@@ -166,7 +166,8 @@ func (m *Model) packRow(c *ui.Context, pack PackSummary) {
 }
 
 func (m *Model) packImportPanel(c *ui.Context) {
-	if (m.cfg.ChoosePackZip == nil && m.cfg.ChoosePackZipAsync == nil) || m.cfg.InstallPack == nil {
+	if (m.cfg.ChoosePackZip == nil && m.cfg.ChoosePackZipAsync == nil) ||
+		(m.cfg.InstallPack == nil && m.cfg.InstallPackAsync == nil) {
 		return
 	}
 	t := c.Theme()
