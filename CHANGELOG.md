@@ -21,6 +21,8 @@
 - 控制台的“选择 zip 文件”和删除确认改为异步打开原生对话框，避免阻塞 UI 线程导致整个窗口卡死；素材包导入也改为后台执行。
 - 素材包 id 限定为小写，避免 macOS/Windows 大小写不敏感文件系统上的 active 状态冲突；`cmd/petpack` 默认尊重 zip manifest 的 id、名称和几何。
 - 设置写入失败时回滚界面与桌宠状态；素材包删除后的残留交由下次启动尽力清理；只装内置包时显示空素材包提示。
+- 新增 WebP 素材包源目录与 `petpack build`/`preview`：从 `pack.source.json` 生成确定性 zip，支持 canvas 坐标热区、可选 crop 固定和源文件内嵌；继续复用现有严格 manifest 校验。
+- 素材包导入行为调整：zip 内 `pack.json` 的非空 `crop` 现在固定使用，超出画布报错；`*_loop` clip 一律标记为循环；显式 `bubbleAnchor` `(0,0)` 被保留；只有音效的交互视为合法。
 
 ## 0.0.1-rc.2
 

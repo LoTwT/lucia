@@ -222,7 +222,7 @@ func NewAnimated(pack *petpack.Pack) (*Model, error) {
 		bubbleAnchorX:  pack.Manifest.BubbleAnchor.X,
 		bubbleAnchorY:  pack.Manifest.BubbleAnchor.Y,
 	}
-	if m.bubbleAnchorX == 0 && m.bubbleAnchorY == 0 {
+	if !pack.Manifest.BubbleAnchorSet && m.bubbleAnchorX == 0 && m.bubbleAnchorY == 0 {
 		m.bubbleAnchorX = 0.5
 		m.bubbleAnchorY = 0.05
 	}

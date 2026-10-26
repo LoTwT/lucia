@@ -15,12 +15,12 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 | `internal/settings` | `settings.json` 的默认值、容错读取与原子写入。 |
 | `internal/updates` | 更新状态机；`MyGo` 适配器把 `mygo.Updater` 接到 `Source` 接口。 |
 | `internal/pet` | 桌宠模型、动画播放状态机、布局、交互、气泡模型与位置规则。 |
-| `internal/petpack` | 素材包合同：WebP/ANMF 解码、单一 schema、校验、Store、lockfile、pending 恢复、zip 安装与裁剪校验。 |
+| `internal/petpack` | 素材包合同：WebP/ANMF 解码、单一 schema、source 生成器、校验、Store、lockfile、pending 恢复、zip 安装与裁剪校验。 |
 | `internal/builtinpack` | 内嵌鲸鱼包、4 帧 WebP、源 PNG、生成脚本与授权说明。 |
 | `internal/brand` | 应用品牌资源，包括托盘图标及其授权说明。 |
 | `internal/ui` | 主窗口模型、侧栏与三个页面（桌宠、素材包、关于），以及 `ui.NewTester` 视图测试。 |
 | `resources/` | 应用图标与需要随包分发的资源；MyGo 在打包时合并到应用资源根。 |
-| `cmd/petpack/` | 开发用导入与 `-check` 校验工具；不随桌面应用分发。 |
+| `cmd/petpack/` | 开发用导入、`-check`、`build` 与 `preview` 工具；不随桌面应用分发。 |
 
 依赖方向：`cmd` → `internal/*`；`internal/ui` 只依赖 `internal/settings` 与 `internal/updates`，素材包页面使用自己的 `PackSummary` 视图模型，不导入 `internal/petpack`；`internal/pet` 依赖 MyGo 的 `ui`、标准库与 `internal/petpack`；`internal/petpack` 只依赖标准库、`golang.org/x/image` 与 `golang.org/x/text`，不反向依赖 `internal/pet` 或 `internal/ui`。这样 WebP/ANMF 解码、导入事务和桌宠状态机可以独立测试，窗口接线保持在上层。`internal/updates` 是唯一直接调用 `mygo.Updater` 的包。
 
@@ -57,6 +57,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 
 - 目录：`<数据目录>/packs/<id>/pack.json` 与 `clips/*.webp`。`petPack` 选择 id；空值使用内嵌包。`lucia-whale` 是保留 id，不写入 settings/lockfile。
 - manifest：`internal/petpack.Manifest` 维护画布、裁剪、窗口/立绘 DIP 尺寸、气泡锚点、clip 列表、动作链、状态、事件、热区、交互、气泡与菜单。只有一个 `schema: 1`，严格解码，无版本分支或旧格式升级。
+- 生成器：`pack.source.json` 是作者侧独立严格契约；`petpack build` 扫描 WebP、计算或固定 crop、生成 actions/states/events/menu、把 canvas 热区转换到 crop 坐标，并产出确定性 zip。build 不安装、不激活；zip 内嵌 source，安装仍走现有导入器。
 - 交互：`hotzones` 是有序数组，`rect` 归一化到裁剪后的立绘，后声明者优先命中。每个热区引用一个 `interaction`；交互包含可选 steps、气泡键、声音、motion 与 `reducedPoster`。`menu` 每项引用 interaction 或有限 action。
 - 安装事务：`petpack.Store` 串行化安装/删除/激活，`packs.lock.json` 缓存已安装元数据，`packs.pending.json` 记录安装阶段。启动时 `Recover` 清理 `.import-*`/`.trash-*`、恢复 `.backup`、删除已完成的 pending，并从磁盘重建 lockfile。正在使用的包不能删除；内置包只读。
 - 解码：`internal/petpack` 解析 WebP RIFF/ANMF，使用 `golang.org/x/image/webp` decode 单帧，再按 blend/dispose 顺序合成；不引入 cgo。每帧保留自身时长，支持特殊动作的长停顿帧。

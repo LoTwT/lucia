@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lucia Pack Builder"
+  short_description: "Build Lucia pet packs from animated WebP clips"
+  default_prompt: "Turn my prepared WebP clips into a validated Lucia pet pack."

@@ -34,7 +34,11 @@ go run ./cmd/lucia
 ```sh
 go run ./cmd/petpack -zip /path/to/pack.zip
 go run ./cmd/petpack -check /path/to/lucia/packs/naiwa
+go run ./cmd/petpack build ./my-pet -o ./dist/my-pet.zip
+go run ./cmd/petpack preview ./my-pet -o ./preview.png
 ```
+
+`build` 从 `pack.source.json` 和 `clips/*.webp` 生成可安装 zip，`preview` 输出原生 canvas 首帧 PNG；两者都不安装或激活素材包。源目录与字段契约见 [素材包源目录与生成器](docs/specs/pet-pack-source.md)。项目内 skill `skills/lucia-pack-builder/` 负责引导确认源信息、调 build/preview、解释 warning 和单独确认安装，不直接写 manifest。
 
 默认自动选择最近使用的数据目录（`Lucia Dev`、`lucia` 或打包版 `Lucia`），也可以显式传 `-app`。数据目录跟随应用名：`go tool mygo dev` 是 `Lucia Dev`，`go run ./cmd/lucia` 或仓库根目录的 `lucia` 是 `lucia`，打包版是 `Lucia`。CLI 默认使用 zip 内 manifest 的 id、名称和几何；显式传 `-id`/`-name` 才覆盖。**不要在 Lucia 运行时同时执行开发工具导入**：CLI 导入前先退出应用，或改用控制台。`-force` 覆盖同名包，`-activate=false` 只导入不切换。`-check <dir>` 校验当前 manifest 与全部 clip。素材包缺失或损坏时应用会回退内置包，并清除失效的 active 选择。
 

@@ -59,7 +59,7 @@ func TestManifestValidation(t *testing.T) {
 			m.Interactions["poke"] = Interaction{Bubble: "missing"}
 		}, "missing bubble"},
 		{"interaction no effect", func(m *Manifest) {
-			m.Interactions["poke"] = Interaction{Sound: true}
+			m.Interactions["poke"] = Interaction{}
 		}, "has no effect"},
 		{"motion needs poster", func(m *Manifest) {
 			m.Interactions["poke"] = Interaction{Motion: "squash"}
@@ -91,6 +91,14 @@ func TestManifestValidation(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestSoundOnlyInteractionIsValid(t *testing.T) {
+	manifest := validTestManifest()
+	manifest.Interactions["poke"] = Interaction{Sound: true}
+	if err := validateManifest("tiny", manifest); err != nil {
+		t.Fatalf("sound-only interaction rejected: %v", err)
 	}
 }
 

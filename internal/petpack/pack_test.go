@@ -3,6 +3,7 @@ package petpack
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"hash/crc32"
@@ -150,6 +151,61 @@ func TestImportZip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(packsRoot, "tiny", "clips", "idle_loop.webp")); err != nil {
 		t.Fatalf("imported clip: %v", err)
+	}
+}
+
+func TestImportZipSkipsFullyTransparentClip(t *testing.T) {
+	dir := t.TempDir()
+	tiny, err := os.ReadFile("testdata/tiny.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(dir, "transparent.zip")
+	writeClipZip(t, zipPath, map[string][]byte{
+		"idle_loop.webp":        tiny,
+		"transparent_loop.webp": transparentClip(t),
+	})
+	pack, err := ImportZip(zipPath, filepath.Join(dir, "packs"), ImportOptions{
+		ID:   "transparent",
+		Base: Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := pack.Clips["transparent_loop"]; !ok {
+		t.Fatal("transparent clip was dropped from the manifest")
+	}
+	tinyClip, err := OpenClip("idle_loop", "testdata/tiny.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounds, err := tinyClip.AlphaBounds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	canvas := image.Rect(0, 0, 16, 16)
+	crop := bounds.Inset(-2).Intersect(canvas)
+	want := Rect{X: crop.Min.X, Y: crop.Min.Y, Width: crop.Dx(), Height: crop.Dy()}
+	if pack.Manifest.Crop != want {
+		t.Fatalf("crop = %+v, want %+v (transparent clip affected alpha bounds)", pack.Manifest.Crop, want)
+	}
+}
+
+func TestImportZipAllTransparentClipsFallBackToCanvas(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "transparent.zip")
+	writeClipZip(t, zipPath, map[string][]byte{
+		"idle_loop.webp": transparentClip(t),
+	})
+	pack, err := ImportZip(zipPath, filepath.Join(dir, "packs"), ImportOptions{
+		ID:   "transparent",
+		Base: Base{Window: Size{20, 20}, Sprite: Size{16, 16}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Rect{Width: 16, Height: 16}); pack.Manifest.Crop != want {
+		t.Fatalf("crop = %+v, want the full canvas %+v", pack.Manifest.Crop, want)
 	}
 }
 
@@ -440,6 +496,41 @@ func writeTinyPack(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// transparentClip is a 16×16, one-frame animated WebP whose pixels are all
+// transparent. It is embedded here instead of adding another artwork fixture;
+// the VP8L payload comes from a solid transparent PNG encoded with img2webp.
+const transparentClipBase64 = "UklGRlIAAABXRUJQVlA4WAoAAAACAAAADwAADwAAQU5JTQYAAAAAAAAAAABBTk1GJgAAAAAAAAAAAA8AAA8AAGQAAABWUDhMDQAAAC8PwAMQBxAREYiI/gcA"
+
+func transparentClip(t *testing.T) []byte {
+	t.Helper()
+	data, err := base64.StdEncoding.DecodeString(transparentClipBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func writeClipZip(t *testing.T, path string, clips map[string][]byte) {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	for name, data := range clips {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeTinyZip(t *testing.T, path string) {
