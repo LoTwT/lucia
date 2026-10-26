@@ -165,7 +165,7 @@ func runPreview(args []string) {
 	flags := flag.NewFlagSet("petpack preview", flag.ExitOnError)
 	output := flags.String("o", "", "output PNG path")
 	clip := flags.String("clip", "", "clip id; empty uses the idle poster")
-	frame := flags.Int("frame", 0, "frame index when -clip is set")
+	frame := flags.Int("frame", 0, "frame index; applies to the idle loop when -clip is empty")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "usage: petpack preview <source-dir> -o <preview.png> [-clip <id>] [-frame <index>]")
 	}

@@ -133,7 +133,7 @@
 - `states` 必填 `idle`，可声明 `drag`、`drowsy`、`asleep`。`asleep` 必须循环或提供 poster；未声明时显示 idle 海报。
 - `events`、`hotzones`、`interactions`、`bubbles`、`menu` 都可为空。没有热区时桌宠仍播放 idle，但立绘不可点击。
 - `idleMotion` 取 `none` 或 `bob`；`interaction.motion` 取 `none`、`bounce`、`lift`，并兼容旧值 `squash`。
-- 校验拒绝：空 rect 或超出 0–1、重复热区 id、未知 interaction/action/bubble、循环动作作为 steps 或菜单动作、负数或超过 60 秒的 delay/hold、motion-only 交互缺少 `reducedPoster`、空气泡行、超过 200 字的气泡、未知 clip/帧引用、Windows 保留目录名。`ImportZip`/`build` 还拒绝整段全透明的 clip；已安装目录的 `-check` 不重新扫描 alpha。`ImportZip`、`Store` 和面向用户包的 `ReadManifest` 还拒绝保留 id `lucia-whale`；内嵌包通过 `LoadFS` 读取。
+- 校验拒绝：空 rect 或超出 0–1、重复热区 id、未知 interaction/action/bubble、循环动作作为 steps 或菜单动作、负数或超过 60 秒的 delay/hold、motion-only 交互缺少 `reducedPoster`、空气泡行、超过 200 字的气泡、未知 clip/帧引用、Windows 保留目录名。`build` 还拒绝整段全透明的 clip；`ImportZip` 计算 crop 时跳过全透明 clip，全部透明时回退整张画布；已安装目录的 `-check` 不重新扫描 alpha。`ImportZip`、`Store` 和面向用户包的 `ReadManifest` 还拒绝保留 id `lucia-whale`；内嵌包通过 `LoadFS` 读取。
 - 示例 manifest 见 [docs/examples/pet-pack.json](../examples/pet-pack.json)；示例中的 `frames` 是结构示意，实际值必须与 WebP 文件一致。
 - 画布与窗口边长上限为 4096 px，单个 clip 帧数上限为 1000；解码器在分配画布前再次校验。
 

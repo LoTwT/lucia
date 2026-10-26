@@ -51,8 +51,9 @@ type ImportOptions struct {
 // validated pack. The zip is never copied wholesale; only .webp clips are
 // extracted. A root pack.json or pack.meta.json supplies id, name, geometry,
 // actions, hotzones and interactions; a non-empty manifest crop is kept as
-// pinned geometry, otherwise crop is derived from alpha bounds. ClipEntry
-// frame counts and hashes are rebuilt from the extracted files.
+// pinned geometry, otherwise crop is derived from alpha bounds after skipping
+// fully transparent clips. ClipEntry frame counts and hashes are rebuilt from
+// the extracted files.
 func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	stage := func(name string) {
 		if opts.OnStage != nil {
@@ -186,7 +187,7 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 			return nil, fmt.Errorf("petpack import: clip %q: %w", item.clip.ID, err)
 		}
 		if bounds.Empty() {
-			return nil, fmt.Errorf("petpack import: clip %q is fully transparent", item.clip.ID)
+			continue
 		}
 		if alphaBounds.Empty() {
 			alphaBounds = bounds
@@ -197,7 +198,11 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	canvasRect := image.Rect(0, 0, canvas.Width, canvas.Height)
 	crop := baseManifest.Crop.ImageRect()
 	if baseManifest.Crop.Empty() {
-		crop = alphaBounds.Inset(-2).Intersect(canvasRect)
+		if alphaBounds.Empty() {
+			crop = canvasRect
+		} else {
+			crop = alphaBounds.Inset(-2).Intersect(canvasRect)
+		}
 	} else if !crop.In(canvasRect) {
 		return nil, fmt.Errorf("petpack import: crop %v outside canvas %v", baseManifest.Crop, canvasRect)
 	}

@@ -72,32 +72,62 @@ type sourceClip struct {
 	bounds image.Rectangle
 }
 
+// stagedSource is a validated source installed into a temporary packs root.
+// The caller owns dir and must close it after the staged pack is no longer
+// needed.
+type stagedSource struct {
+	dir    string
+	pack   *Pack
+	result BuildResult
+}
+
+func (s *stagedSource) close() {
+	_ = os.RemoveAll(s.dir)
+}
+
 // Build validates a source directory and writes a deterministic pack zip.
 // It never installs the pack or writes to the user data directory.
 func Build(sourceDir, output string, force bool) (BuildResult, error) {
-	sourceDir, err := filepath.Abs(sourceDir)
-	if err != nil {
-		return BuildResult{}, err
-	}
 	if output == "" {
 		return BuildResult{}, fmt.Errorf("petpack build: output path is required")
 	}
-	output, err = filepath.Abs(output)
+	output, err := filepath.Abs(output)
 	if err != nil {
 		return BuildResult{}, err
+	}
+	staged, err := prepareSource(sourceDir)
+	if err != nil {
+		return BuildResult{}, err
+	}
+	defer staged.close()
+	if err := publishSource(staged, output, force); err != nil {
+		return BuildResult{}, err
+	}
+	result := staged.result
+	result.Path = output
+	return result, nil
+}
+
+// prepareSource validates a source directory and installs a staging copy
+// through ImportZip, so building and importing share the same manifest
+// validation. The returned temporary directory stays alive until close.
+func prepareSource(sourceDir string) (*stagedSource, error) {
+	sourceDir, err := filepath.Abs(sourceDir)
+	if err != nil {
+		return nil, err
 	}
 
 	source, err := LoadSource(sourceDir)
 	if err != nil {
-		return BuildResult{}, err
+		return nil, err
 	}
 	clips, warnings, canvas, alphaBounds, err := scanSourceClips(sourceDir, source)
 	if err != nil {
-		return BuildResult{}, err
+		return nil, err
 	}
 	if source.Canvas != nil {
 		if source.Canvas.Width != canvas.Width || source.Canvas.Height != canvas.Height {
-			return BuildResult{}, fmt.Errorf("petpack build: canvas %dx%d, want %dx%d",
+			return nil, fmt.Errorf("petpack build: canvas %dx%d, want %dx%d",
 				canvas.Width, canvas.Height, source.Canvas.Width, source.Canvas.Height)
 		}
 	}
@@ -105,7 +135,7 @@ func Build(sourceDir, output string, force bool) (BuildResult, error) {
 	if source.Crop != nil {
 		crop = *source.Crop
 		if !crop.ImageRect().In(image.Rect(0, 0, canvas.Width, canvas.Height)) {
-			return BuildResult{}, fmt.Errorf("petpack build: crop %v outside canvas", crop)
+			return nil, fmt.Errorf("petpack build: crop %v outside canvas", crop)
 		}
 		if !alphaBounds.In(crop.ImageRect()) {
 			warnings = append(warnings, fmt.Sprintf(
@@ -138,7 +168,7 @@ func Build(sourceDir, output string, force bool) (BuildResult, error) {
 		for i, entry := range *source.Menu {
 			if entry.Interaction != "" {
 				if _, ok := sourceHotzoneByID(source.Hotzones, entry.Interaction); !ok {
-					return BuildResult{}, fmt.Errorf("petpack build: menu entry %d references missing hotzone %q",
+					return nil, fmt.Errorf("petpack build: menu entry %d references missing hotzone %q",
 						i, entry.Interaction)
 				}
 				menu = append(menu, MenuEntry{Interaction: entry.Interaction})
@@ -146,35 +176,35 @@ func Build(sourceDir, output string, force bool) (BuildResult, error) {
 			}
 			action, ok := actions[entry.Action]
 			if !ok {
-				return BuildResult{}, fmt.Errorf("petpack build: menu entry %d references missing action %q",
+				return nil, fmt.Errorf("petpack build: menu entry %d references missing action %q",
 					i, entry.Action)
 			}
 			if err := validateFiniteAction(entry.Action, action); err != nil {
-				return BuildResult{}, fmt.Errorf("petpack build: menu entry %d: %w", i, err)
+				return nil, fmt.Errorf("petpack build: menu entry %d: %w", i, err)
 			}
 			menu = append(menu, MenuEntry{Action: entry.Action})
 		}
 	}
 
+	if _, ok := actions["idle"]; !ok {
+		return nil, fmt.Errorf("petpack build: missing idle action")
+	}
 	hotzones := make([]Hotzone, 0, len(source.Hotzones))
 	interactions := make(map[string]Interaction, len(source.Hotzones))
 	bubbles := make(map[string][]string, len(source.Hotzones))
 	for _, zone := range source.Hotzones {
 		if !zone.Rect.ImageRect().In(crop.ImageRect()) {
-			return BuildResult{}, fmt.Errorf("petpack build: hotzone %q is outside crop %v; pin crop or move the rect inside the alpha bounds",
+			return nil, fmt.Errorf("petpack build: hotzone %q is outside crop %v; pin crop or move the rect inside the alpha bounds",
 				zone.ID, crop)
-		}
-		if _, ok := actions["idle"]; !ok {
-			return BuildResult{}, fmt.Errorf("petpack build: missing idle action")
 		}
 		for i, step := range zone.Steps {
 			action, ok := actions[step.Action]
 			if !ok {
-				return BuildResult{}, fmt.Errorf("petpack build: hotzone %q step %d references missing action %q",
+				return nil, fmt.Errorf("petpack build: hotzone %q step %d references missing action %q",
 					zone.ID, i, step.Action)
 			}
 			if err := validateFiniteAction(step.Action, action); err != nil {
-				return BuildResult{}, fmt.Errorf("petpack build: hotzone %q step %d: %w",
+				return nil, fmt.Errorf("petpack build: hotzone %q step %d: %w",
 					zone.ID, i, err)
 			}
 		}
@@ -195,7 +225,7 @@ func Build(sourceDir, output string, force bool) (BuildResult, error) {
 		if interaction.ReducedPoster == "auto" {
 			interaction.ReducedPoster = actions["idle"].Poster
 			if interaction.ReducedPoster == "" {
-				return BuildResult{}, fmt.Errorf("petpack build: idle action has no poster for reducedPoster auto")
+				return nil, fmt.Errorf("petpack build: idle action has no poster for reducedPoster auto")
 			}
 		}
 		interactions[zone.ID] = interaction
@@ -249,16 +279,21 @@ func Build(sourceDir, output string, force bool) (BuildResult, error) {
 
 	tmp, err := os.MkdirTemp("", "lucia-pack-build-")
 	if err != nil {
-		return BuildResult{}, err
+		return nil, err
 	}
-	defer os.RemoveAll(tmp)
+	keep := false
+	defer func() {
+		if !keep {
+			_ = os.RemoveAll(tmp)
+		}
+	}()
 	seedZip := filepath.Join(tmp, "source.zip")
 	if err := writeSeedZip(seedZip, seed, clips); err != nil {
-		return BuildResult{}, err
+		return nil, err
 	}
 	packsRoot := filepath.Join(tmp, "packs")
 	if err := os.MkdirAll(packsRoot, 0o755); err != nil {
-		return BuildResult{}, err
+		return nil, err
 	}
 	pack, err := ImportZip(seedZip, packsRoot, ImportOptions{
 		ID:              source.ID,
@@ -268,36 +303,16 @@ func Build(sourceDir, output string, force bool) (BuildResult, error) {
 		BubbleAnchorSet: true,
 	})
 	if err != nil {
-		return BuildResult{}, err
+		return nil, err
 	}
 	sourceBytes, err := artifactSourceBytes(source, clips)
 	if err != nil {
-		return BuildResult{}, err
+		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(pack.Dir, sourceFileName), sourceBytes, 0o644); err != nil {
-		return BuildResult{}, err
-	}
-	backup, err := writeDeterministicZip(pack.Dir, output, force)
-	if err != nil {
-		return BuildResult{}, err
-	}
-	if err := verifyBuiltZip(output, pack, source.ID); err != nil {
-		removeErr := os.Remove(output)
-		var restoreErr error
-		if backup != "" {
-			restoreErr = os.Rename(backup, output)
-		}
-		if removeErr != nil || restoreErr != nil {
-			return BuildResult{}, fmt.Errorf("%w (restore previous output: remove=%v rename=%v, backup=%q)",
-				err, removeErr, restoreErr, backup)
-		}
-		return BuildResult{}, err
-	}
-	if backup != "" {
-		_ = os.Remove(backup)
+		return nil, err
 	}
 	result := BuildResult{
-		Path:         output,
 		ID:           source.ID,
 		Canvas:       pack.Manifest.Canvas,
 		Crop:         pack.Manifest.Crop,
@@ -310,7 +325,34 @@ func Build(sourceDir, output string, force bool) (BuildResult, error) {
 	for _, clip := range pack.Clips {
 		result.Frames += clip.FrameCount()
 	}
-	return result, nil
+	keep = true
+	return &stagedSource{dir: tmp, pack: pack, result: result}, nil
+}
+
+// publishSource writes the staged pack as a deterministic zip and verifies a
+// real import of that zip matches the staging manifest.
+func publishSource(staged *stagedSource, output string, force bool) error {
+	pack := staged.pack
+	backup, err := writeDeterministicZip(pack.Dir, output, force)
+	if err != nil {
+		return err
+	}
+	if err := verifyBuiltZip(output, pack, pack.Manifest.ID); err != nil {
+		removeErr := os.Remove(output)
+		var restoreErr error
+		if backup != "" {
+			restoreErr = os.Rename(backup, output)
+		}
+		if removeErr != nil || restoreErr != nil {
+			return fmt.Errorf("%w (restore previous output: remove=%v rename=%v, backup=%q)",
+				err, removeErr, restoreErr, backup)
+		}
+		return err
+	}
+	if backup != "" {
+		_ = os.Remove(backup)
+	}
+	return nil
 }
 
 // PreviewSource builds the source in a temporary location and writes one
@@ -322,27 +364,12 @@ func PreviewSource(sourceDir, output, clipID string, frame int) (BuildResult, er
 	if frame < 0 {
 		return BuildResult{}, fmt.Errorf("petpack preview: frame must not be negative")
 	}
-	tmp, err := os.MkdirTemp("", "lucia-pack-preview-")
+	staged, err := prepareSource(sourceDir)
 	if err != nil {
 		return BuildResult{}, err
 	}
-	defer os.RemoveAll(tmp)
-	zipPath := filepath.Join(tmp, "pack.zip")
-	result, err := Build(sourceDir, zipPath, true)
-	if err != nil {
-		return BuildResult{}, err
-	}
-	packsRoot := filepath.Join(tmp, "packs")
-	if err := os.MkdirAll(packsRoot, 0o755); err != nil {
-		return BuildResult{}, err
-	}
-	if _, err := ImportZip(zipPath, packsRoot, ImportOptions{ID: result.ID}); err != nil {
-		return BuildResult{}, err
-	}
-	pack, err := LoadDir(filepath.Join(packsRoot, result.ID), result.ID, 1)
-	if err != nil {
-		return BuildResult{}, err
-	}
+	defer staged.close()
+	pack := staged.pack
 	posterClip := clipID
 	if posterClip == "" {
 		action, ok := pack.Action("idle")
@@ -392,8 +419,8 @@ func PreviewSource(sourceDir, output, clipID string, frame int) (BuildResult, er
 	if closeErr != nil {
 		return BuildResult{}, closeErr
 	}
-	result.Canvas = pack.Manifest.Canvas
-	result.Crop = pack.Manifest.Crop
+	result := staged.result
+	result.Path = output
 	return result, nil
 }
 
@@ -425,9 +452,6 @@ func scanSourceClips(sourceDir string, source Source) (map[string]sourceClip, []
 			if entry.IsDir() {
 				return nil
 			}
-			if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
-				return fmt.Errorf("petpack build: clip %q is not a regular file", path)
-			}
 			rel, err := filepath.Rel(sourceDir, path)
 			if err != nil {
 				return err
@@ -435,6 +459,9 @@ func scanSourceClips(sourceDir string, source Source) (map[string]sourceClip, []
 			relSlash := filepath.ToSlash(rel)
 			if isMacMetadata(relSlash) || !strings.EqualFold(filepath.Ext(path), ".webp") {
 				return nil
+			}
+			if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
+				return fmt.Errorf("petpack build: clip %q is not a regular file", path)
 			}
 			id, err := clipIDFromName(relSlash)
 			if err != nil {
@@ -656,12 +683,17 @@ func writeSeedZip(path string, manifest Manifest, clips map[string]sourceClip) e
 }
 
 func writeDeterministicZip(dir, output string, force bool) (backup string, err error) {
-	if !force {
-		if _, err := os.Stat(output); err == nil {
-			return "", fmt.Errorf("petpack build: output %q already exists (use -force to replace it)", output)
-		} else if !os.IsNotExist(err) {
-			return "", err
+	info, statErr := os.Lstat(output)
+	switch {
+	case statErr == nil:
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("petpack build: output %q is not a regular file", output)
 		}
+		if !force {
+			return "", fmt.Errorf("petpack build: output %q already exists (use -force to replace it)", output)
+		}
+	case !os.IsNotExist(statErr):
+		return "", statErr
 	}
 	parent := filepath.Dir(output)
 	if err := os.MkdirAll(parent, 0o755); err != nil {

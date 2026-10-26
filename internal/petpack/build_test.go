@@ -253,6 +253,101 @@ func TestBuildRequiresForceToReplaceOutput(t *testing.T) {
 	}
 }
 
+func TestBuildForceRejectsDirectoryOutput(t *testing.T) {
+	dir := writeSourceFixture(t, Source{Source: 1, ID: "tiny", Name: "Tiny"}, []string{"idle_loop.webp"})
+	parent := t.TempDir()
+	out := filepath.Join(parent, "existing")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(out, "keep.txt")
+	if err := os.WriteFile(sentinel, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Build(dir, out, true)
+	if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("Build error = %v, want non-regular output error", err)
+	}
+	info, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("output directory disappeared: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("output is no longer a directory: %v", info.Mode())
+	}
+	data, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("directory contents changed: %v", err)
+	}
+	if string(data) != "keep me" {
+		t.Fatalf("sentinel = %q", data)
+	}
+	backups, err := filepath.Glob(filepath.Join(parent, ".petpack-bak-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 0 {
+		t.Fatalf("leftover backups: %v", backups)
+	}
+}
+
+func TestBuildHonorsEmptyMenu(t *testing.T) {
+	empty := []SourceMenuEntry{}
+	source := Source{Source: 1, ID: "tiny", Name: "Tiny", Menu: &empty}
+	dir := writeSourceFixture(t, source, []string{"idle_loop.webp", "belly_taunt.webp"})
+	out := filepath.Join(t.TempDir(), "tiny.zip")
+	if _, err := Build(dir, out, false); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := readZipManifestFromPath(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := manifest.Actions["belly_taunt"]; !ok {
+		t.Fatal("fixture did not generate a special action; empty-menu assertion is not meaningful")
+	}
+	if len(manifest.Menu) != 0 {
+		t.Fatalf("menu = %+v, want empty", manifest.Menu)
+	}
+}
+
+func TestBuildRejectsFullyTransparentClip(t *testing.T) {
+	dir := writeSourceFixture(t, Source{Source: 1, ID: "tiny", Name: "Tiny"}, []string{"idle_loop.webp"})
+	if err := os.WriteFile(filepath.Join(dir, "clips", "happy_loop.webp"), transparentClip(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Build(dir, filepath.Join(t.TempDir(), "tiny.zip"), false)
+	if err == nil || !strings.Contains(err.Error(), "fully transparent") {
+		t.Fatalf("Build error = %v, want fully transparent clip error", err)
+	}
+}
+
+func TestBuildSkipsNonWebPSymlinkDuringScan(t *testing.T) {
+	dir := writeSourceFixture(t, Source{Source: 1, ID: "tiny", Name: "Tiny"}, []string{"idle_loop.webp"})
+	target := filepath.Join(dir, "preview.mp4")
+	if err := os.WriteFile(target, []byte("not a clip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "clips", "preview.mp4")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := Build(dir, filepath.Join(t.TempDir(), "tiny.zip"), false); err != nil {
+		t.Fatalf("Build rejected a non-WebP symlink: %v", err)
+	}
+}
+
+func TestBuildRejectsWebPSymlinkDuringScan(t *testing.T) {
+	dir := writeSourceFixture(t, Source{Source: 1, ID: "tiny", Name: "Tiny"}, []string{"idle_loop.webp"})
+	link := filepath.Join(dir, "clips", "happy_loop.webp")
+	if err := os.Symlink(filepath.Join(dir, "clips", "idle_loop.webp"), link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	_, err := Build(dir, filepath.Join(t.TempDir(), "tiny.zip"), false)
+	if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("Build error = %v, want symlink rejection", err)
+	}
+}
+
 func TestBuildForceKeepsUnrelatedBakFile(t *testing.T) {
 	dir := writeSourceFixture(t, Source{Source: 1, ID: "tiny", Name: "Tiny"}, []string{"idle_loop.webp"})
 	out := filepath.Join(t.TempDir(), "tiny.zip")
