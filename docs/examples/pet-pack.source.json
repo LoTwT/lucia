@@ -1,0 +1,38 @@
+{
+  "source": 1,
+  "id": "example",
+  "name": "示例桌宠",
+  "license": {
+    "status": "CC BY-NC-SA 4.0",
+    "note": "示例元数据；分发前替换为素材的真实授权信息。"
+  },
+  "canvas": { "width": 800, "height": 800 },
+  "window": { "width": 248, "height": 310 },
+  "sprite": { "width": 240, "height": 300 },
+  "crop": { "x": 80, "y": 20, "width": 640, "height": 760 },
+  "clips": {
+    "idle_loop": "clips/idle_loop_待机_循环.webp",
+    "laugh_enter": "clips/laugh_enter_大笑_进入.webp",
+    "laugh_loop": "clips/laugh_loop_大笑_循环.webp",
+    "laugh_exit": "clips/laugh_exit_大笑_退出.webp",
+    "belly_taunt": "clips/01_belly_taunt_肚肚挑衅.webp"
+  },
+  "bubbleAnchor": { "x": 0.5, "y": 0.05 },
+  "hotzones": [
+    {
+      "id": "face",
+      "label": "摸摸脸",
+      "rect": { "x": 220, "y": 300, "width": 240, "height": 160 },
+      "steps": [{ "action": "laugh" }],
+      "bubble": ["别戳脸啦……", "脸要变形了。"],
+      "sound": true,
+      "motion": "bounce",
+      "reducedPoster": "auto"
+    }
+  ],
+  "menu": [
+    { "interaction": "face" },
+    { "action": "belly_taunt" }
+  ],
+  "idleMotion": "none"
+}

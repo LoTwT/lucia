@@ -32,14 +32,16 @@ type importedClip struct {
 }
 
 // ImportOptions controls the metadata written by an import. Base is a
-// presentation choice; the clips and crop come from the zip. A pack may
-// carry its own pack.json, which supplies any field left zero here.
+// presentation choice; clips come from the zip. A pack's pack.json may pin
+// crop and supply its geometry. BubbleAnchorSet distinguishes an explicit
+// (0,0) anchor from an omitted one.
 type ImportOptions struct {
-	ID           string
-	Name         string
-	Base         Base
-	BubbleAnchor Anchor
-	Force        bool
+	ID              string
+	Name            string
+	Base            Base
+	BubbleAnchor    Anchor
+	BubbleAnchorSet bool
+	Force           bool
 	// OnStage reports the import's current stage for crash recovery. It is
 	// called synchronously from ImportZip.
 	OnStage func(string)
@@ -48,8 +50,9 @@ type ImportOptions struct {
 // ImportZip converts an animated-WebP zip into packs/<id> and returns the
 // validated pack. The zip is never copied wholesale; only .webp clips are
 // extracted. A root pack.json or pack.meta.json supplies id, name, geometry,
-// actions, hotzones and interactions; the ClipEntry list is rebuilt from the
-// extracted files.
+// actions, hotzones and interactions; a non-empty manifest crop is kept as
+// pinned geometry, otherwise crop is derived from alpha bounds. ClipEntry
+// frame counts and hashes are rebuilt from the extracted files.
 func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	stage := func(name string) {
 		if opts.OnStage != nil {
@@ -87,10 +90,17 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	if opts.Name == "" {
 		opts.Name = opts.ID
 	}
-	if opts.BubbleAnchor.X == 0 && opts.BubbleAnchor.Y == 0 {
-		opts.BubbleAnchor = baseManifest.BubbleAnchor
+	if !opts.BubbleAnchorSet && (opts.BubbleAnchor.X != 0 || opts.BubbleAnchor.Y != 0) {
+		opts.BubbleAnchorSet = true
 	}
-	if opts.BubbleAnchor.X == 0 && opts.BubbleAnchor.Y == 0 {
+	if !opts.BubbleAnchorSet {
+		if baseManifest.BubbleAnchorSet ||
+			baseManifest.BubbleAnchor.X != 0 || baseManifest.BubbleAnchor.Y != 0 {
+			opts.BubbleAnchor = baseManifest.BubbleAnchor
+			opts.BubbleAnchorSet = true
+		}
+	}
+	if !opts.BubbleAnchorSet {
 		opts.BubbleAnchor = Anchor{X: 0.5, Y: 0.05}
 	}
 	if err := os.MkdirAll(packsRoot, 0o755); err != nil {
@@ -125,6 +135,9 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		clipID, err := clipIDFromName(name)
 		if err != nil {
 			return nil, fmt.Errorf("petpack import: %q: %w", name, err)
+		}
+		if windowsReservedPackID(clipID) {
+			return nil, fmt.Errorf("petpack import: clip id %q is a reserved Windows name", clipID)
 		}
 		if _, exists := imported[clipID]; exists {
 			return nil, fmt.Errorf("petpack import: duplicate clip %q", clipID)
@@ -166,25 +179,28 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		return nil, fmt.Errorf("petpack import: missing idle_loop clip")
 	}
 
-	crop := image.Rectangle{}
+	alphaBounds := image.Rectangle{}
 	for _, item := range imported {
 		bounds, err := item.clip.AlphaBounds()
 		if err != nil {
 			return nil, fmt.Errorf("petpack import: clip %q: %w", item.clip.ID, err)
 		}
 		if bounds.Empty() {
-			continue
+			return nil, fmt.Errorf("petpack import: clip %q is fully transparent", item.clip.ID)
 		}
-		if crop.Empty() {
-			crop = bounds
+		if alphaBounds.Empty() {
+			alphaBounds = bounds
 		} else {
-			crop = crop.Union(bounds)
+			alphaBounds = alphaBounds.Union(bounds)
 		}
 	}
-	if crop.Empty() {
-		crop = image.Rect(0, 0, canvas.Width, canvas.Height)
+	canvasRect := image.Rect(0, 0, canvas.Width, canvas.Height)
+	crop := baseManifest.Crop.ImageRect()
+	if baseManifest.Crop.Empty() {
+		crop = alphaBounds.Inset(-2).Intersect(canvasRect)
+	} else if !crop.In(canvasRect) {
+		return nil, fmt.Errorf("petpack import: crop %v outside canvas %v", baseManifest.Crop, canvasRect)
 	}
-	crop = crop.Inset(-2).Intersect(image.Rect(0, 0, canvas.Width, canvas.Height))
 
 	base := opts.Base
 	if base.Window.Width == 0 && base.Window.Height == 0 {
@@ -228,22 +244,26 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		Crop: Rect{
 			X: crop.Min.X, Y: crop.Min.Y, Width: crop.Dx(), Height: crop.Dy(),
 		},
-		Base:         base,
-		BubbleAnchor: opts.BubbleAnchor,
-		Clips:        make(map[string]ClipEntry, len(imported)),
-		Actions:      actions,
-		States:       states,
-		Events:       events,
-		Hotzones:     baseManifest.Hotzones,
-		Interactions: baseManifest.Interactions,
-		Bubbles:      baseManifest.Bubbles,
-		Menu:         menu,
-		IdleMotion:   baseManifest.IdleMotion,
+		Base:            base,
+		BubbleAnchor:    opts.BubbleAnchor,
+		BubbleAnchorSet: true,
+		Clips:           make(map[string]ClipEntry, len(imported)),
+		Actions:         actions,
+		States:          states,
+		Events:          events,
+		Hotzones:        baseManifest.Hotzones,
+		Interactions:    baseManifest.Interactions,
+		Bubbles:         baseManifest.Bubbles,
+		Menu:            menu,
+		IdleMotion:      baseManifest.IdleMotion,
 	}
 	for id, item := range imported {
 		entry := item.entry
-		if old, ok := baseManifest.Clips[id]; ok {
-			entry.Loop = old.Loop
+		entry.Loop = strings.HasSuffix(id, "_loop")
+		if !entry.Loop {
+			if old, ok := baseManifest.Clips[id]; ok {
+				entry.Loop = old.Loop
+			}
 		}
 		manifest.Clips[id] = entry
 	}
@@ -407,10 +427,17 @@ func clipIDFromName(name string) (string, error) {
 }
 
 func buildActions(imported map[string]importedClip) map[string]Action {
-	has := func(id string) bool {
+	return buildActionsWith(func(id string) bool {
 		_, ok := imported[id]
 		return ok
-	}
+	})
+}
+
+func buildActionsFromIDs(ids map[string]bool) map[string]Action {
+	return buildActionsWith(func(id string) bool { return ids[id] })
+}
+
+func buildActionsWith(has func(string) bool) map[string]Action {
 	actions := make(map[string]Action)
 	addChain := func(id, label string, loopCount int, interruptible bool) {
 		enter, loop, exit := id+"_enter", id+"_loop", id+"_exit"

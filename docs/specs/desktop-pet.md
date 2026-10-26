@@ -128,12 +128,12 @@
 ```
 
 - 只有 `schema: 1`。缺失、其他值或未知字段都在严格解码阶段失败；代码中只有一个解析路径。素材包 `id` 只允许小写字母、数字、`_` 和 `-`，避免 macOS/Windows 大小写不敏感文件系统上的目录冲突。
-- `canvas`、`crop`、`base.window`、`base.sprite`、`bubbleAnchor` 定义几何；`crop` 是画布内的裁剪矩形，导入时计算不透明区域并外扩 2 px。
+- `canvas`、`crop`、`base.window`、`base.sprite`、`bubbleAnchor` 定义几何；manifest 的非空 `crop` 会被保留为固定裁剪，空 `crop` 才由导入器计算不透明区域并外扩 2 px。`bubbleAnchor` 缺失时使用 `0.5,0.05`，显式 `(0,0)` 会被保留。
 - `clips` 保存文件名、帧数、循环标志和 SHA-256；`actions` 把状态和事件映射到 `enter/loop/exit/once` clip。`loopCount = -1` 表示持续循环，`0` 跳过 loop，`> 0` 播放指定遍数。
 - `states` 必填 `idle`，可声明 `drag`、`drowsy`、`asleep`。`asleep` 必须循环或提供 poster；未声明时显示 idle 海报。
 - `events`、`hotzones`、`interactions`、`bubbles`、`menu` 都可为空。没有热区时桌宠仍播放 idle，但立绘不可点击。
 - `idleMotion` 取 `none` 或 `bob`；`interaction.motion` 取 `none`、`bounce`、`lift`，并兼容旧值 `squash`。
-- 校验拒绝：空 rect 或超出 0–1、重复热区 id、未知 interaction/action/bubble、循环动作作为 steps 或菜单动作、负数或超过 60 秒的 delay/hold、motion-only 交互缺少 `reducedPoster`、空气泡行、超过 200 字的气泡、未知 clip/帧引用、Windows 保留目录名。`ImportZip`、`Store` 和面向用户包的 `ReadManifest` 还拒绝保留 id `lucia-whale`；内嵌包通过 `LoadFS` 读取。
+- 校验拒绝：空 rect 或超出 0–1、重复热区 id、未知 interaction/action/bubble、循环动作作为 steps 或菜单动作、负数或超过 60 秒的 delay/hold、motion-only 交互缺少 `reducedPoster`、空气泡行、超过 200 字的气泡、未知 clip/帧引用、Windows 保留目录名。`ImportZip`/`build` 还拒绝整段全透明的 clip；已安装目录的 `-check` 不重新扫描 alpha。`ImportZip`、`Store` 和面向用户包的 `ReadManifest` 还拒绝保留 id `lucia-whale`；内嵌包通过 `LoadFS` 读取。
 - 示例 manifest 见 [docs/examples/pet-pack.json](../examples/pet-pack.json)；示例中的 `frames` 是结构示意，实际值必须与 WebP 文件一致。
 - 画布与窗口边长上限为 4096 px，单个 clip 帧数上限为 1000；解码器在分配画布前再次校验。
 
@@ -150,8 +150,10 @@
   go run ./cmd/petpack -zip /path/to/pack.zip
   go run ./cmd/petpack -zip /path/to/pack.zip -app Lucia
   go run ./cmd/petpack -check <pack-dir>
+  go run ./cmd/petpack build ./my-pet -o ./dist/my-pet.zip
+  go run ./cmd/petpack preview ./my-pet -o ./preview.png
   ```
-  `-force` 覆盖同名包，`-activate=false` 只导入不切换。数据目录默认自动选择最近使用的 `Lucia Dev`、`lucia` 或 `Lucia`。
+  `-force` 覆盖同名包，`-activate=false` 只导入不切换。数据目录默认自动选择最近使用的 `Lucia Dev`、`lucia` 或 `Lucia`。`build` 从 `pack.source.json` 生成 zip，`preview` 输出原生 canvas 首帧 PNG，二者都不安装；作者契约见 [pet-pack-source.md](pet-pack-source.md)。
 
 ## 解码与播放
 
@@ -199,7 +201,7 @@ go tool mygo vet .
 macOS 真机手工检查：
 
 - 内置鲸鱼仍为 248×248，拖动、眨眼、呼吸、垂直轻弹和气泡不回归。
-- 导入 naiwa 后窗口为 248×310，idle 动起来，点脸/摸头/拖动/特殊动作按 manifest 播放。
+- 导入 naiwa 后窗口为 248×310，idle、拖动和特殊动作菜单可用；naiwa 源 zip 没有 manifest，当前导入不会生成点击热区。需要点脸/摸头时，用 `pack.source.json` 声明 canvas 热区后重新 `build`。
 - 切换四档尺寸时窗口、立绘、热区和气泡锚点同步缩放，底边中点不跳。
 - Reduce Motion 下只显示静态海报，交互海报 1.2 秒，动作菜单入口消失。
 - 素材包删除或损坏后启动退回鲸鱼，控制台不再显示“使用中”。

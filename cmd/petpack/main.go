@@ -1,6 +1,6 @@
-// Command petpack imports an animated-WebP pet pack into Lucia's data
-// directory. It is a development tool; the desktop app never ships the
-// naiwa artwork itself.
+// Command petpack imports, validates, builds, and previews animated-WebP pet
+// packs. It is a development tool; the desktop app never ships the naiwa
+// artwork itself.
 package main
 
 import (
@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/LoTwT/lucia/internal/apppaths"
@@ -18,6 +19,16 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "build":
+			runBuild(os.Args[2:])
+			return
+		case "preview":
+			runPreview(os.Args[2:])
+			return
+		}
+	}
 	zipPath := flag.String("zip", "", "animated-WebP zip to import")
 	appName := flag.String("app", "", "application name used to resolve the data directory; empty auto-detects Lucia Dev, lucia or Lucia")
 	dataDir := flag.String("data", "", "explicit data directory; overrides -app")
@@ -29,7 +40,7 @@ func main() {
 	flag.Parse()
 
 	if *zipPath == "" && *checkDir == "" {
-		fmt.Fprintln(os.Stderr, "usage: petpack (-zip <pack.zip> | -check <pack-dir>) [-app <name> | -data <dir>] [-force]")
+		fmt.Fprintln(os.Stderr, "usage:\n  petpack (-zip <pack.zip> | -check <pack-dir>) [-app <name> | -data <dir>] [-force]\n  petpack build <source-dir> -o <pack.zip> [-force]\n  petpack preview <source-dir> -o <preview.png> [-clip <id>] [-frame <index>]")
 		os.Exit(2)
 	}
 	data := *dataDir
@@ -108,6 +119,73 @@ func main() {
 	if *activate {
 		fmt.Printf("settings.json now selects %q; restart Lucia to use it\n", pack.Manifest.ID)
 	}
+}
+
+func leadingSourceArg(args []string) (string, []string) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return args[0], args[1:]
+	}
+	return "", args
+}
+
+func runBuild(args []string) {
+	source, args := leadingSourceArg(args)
+	flags := flag.NewFlagSet("petpack build", flag.ExitOnError)
+	output := flags.String("o", "", "output zip path")
+	force := flags.Bool("force", false, "replace an existing output zip")
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "usage: petpack build <source-dir> -o <pack.zip> [-force]")
+	}
+	if err := flags.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	if source == "" && flags.NArg() == 1 {
+		source = flags.Arg(0)
+	}
+	if source == "" || *output == "" || flags.NArg() > 0 && flags.Arg(0) != source {
+		flags.Usage()
+		os.Exit(2)
+	}
+	result, err := petpack.Build(source, *output, *force)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("pack=%s clips=%d frames=%d actions=%d hotzones=%d interactions=%d canvas=%dx%d crop=%d,%d,%dx%d\n",
+		result.ID, result.Clips, result.Frames, result.Actions, result.Hotzones, result.Interactions,
+		result.Canvas.Width, result.Canvas.Height,
+		result.Crop.X, result.Crop.Y, result.Crop.Width, result.Crop.Height)
+	for _, warning := range result.Warnings {
+		fmt.Printf("warning: %s\n", warning)
+	}
+	fmt.Printf("zip=%s\n", result.Path)
+}
+
+func runPreview(args []string) {
+	source, args := leadingSourceArg(args)
+	flags := flag.NewFlagSet("petpack preview", flag.ExitOnError)
+	output := flags.String("o", "", "output PNG path")
+	clip := flags.String("clip", "", "clip id; empty uses the idle poster")
+	frame := flags.Int("frame", 0, "frame index when -clip is set")
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "usage: petpack preview <source-dir> -o <preview.png> [-clip <id>] [-frame <index>]")
+	}
+	if err := flags.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	if source == "" && flags.NArg() == 1 {
+		source = flags.Arg(0)
+	}
+	if source == "" || *output == "" || flags.NArg() > 0 && flags.Arg(0) != source {
+		flags.Usage()
+		os.Exit(2)
+	}
+	result, err := petpack.PreviewSource(source, *output, *clip, *frame)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("preview=%s pack=%s canvas=%dx%d crop=%d,%d,%dx%d\n",
+		*output, result.ID, result.Canvas.Width, result.Canvas.Height,
+		result.Crop.X, result.Crop.Y, result.Crop.Width, result.Crop.Height)
 }
 
 // detectAppName chooses the data directory touched most recently among the

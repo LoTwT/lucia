@@ -68,7 +68,7 @@ lucia: self-test: version=0.0.1 commit=0123456789ab platform=darwin/arm64 update
 - `internal/settings`：默认值合并、旧文件新增字段迁移、原子写入往返、损坏文件回退。
 - `internal/updates`：禁用构建不联网、检查结果、失败可见、并发拒绝、安装进度、安装失败保留重试、自动检查启动。
 - `internal/pet`：内置立绘解码、眨眼帧选择、点击反应曲线、脸部点击区、身体拖动区、非方形布局、动画 idle/互动/拖动/特殊动作、Reduce Motion 海报、右键菜单、气泡台词与定位、透明根节点、可见像素、托盘图标尺寸，以及窗口位置约束。
-- `internal/petpack`：动画 WebP 的 ANMF 解析、部分帧、blend/dispose、裁剪缩放、单一 schema 严格校验、热区/交互/菜单/状态/事件/气泡、海报帧、zip 安装与 manifest 合并、Store/lockfile/pending 恢复、Unicode Path/GBK 文件名与 clip ID 归一化。
+- `internal/petpack`：动画 WebP 的 ANMF 解析、部分帧、blend/dispose、裁剪缩放、单一 schema 严格校验、热区/交互/菜单/状态/事件/气泡、海报帧、zip 安装与 manifest 合并、Store/lockfile/pending 恢复、Unicode Path/GBK 文件名与 clip ID 归一化，以及 `pack.source.json` 生成器与确定性 zip 构建。
 - `internal/ui`：桌宠设置、应用/气泡主题映射与提示、分组设置卡片、侧栏页面切换、关于页版本/更新/数据信息、可用更新显示说明与安装按钮、禁用构建的解释。
 
 视图测试不打开窗口，但会执行真实布局与点击；`ui.NewTester` 对重复 key 与生命周期错误是严格的。位置约束和气泡定位是纯几何测试；桌宠的透明、置顶、拖动、跨屏、气泡穿透与托盘必须另做真机验收，测试器不能代替窗口行为。
@@ -81,7 +81,7 @@ lucia: self-test: version=0.0.1 commit=0123456789ab platform=darwin/arm64 update
 | Windows | 数据 `%LOCALAPPDATA%\Lucia`；日志 `%LOCALAPPDATA%\Lucia\logs\lucia.log`。 |
 
 - `settings.json` 位于数据目录，保存应用主题、桌宠可见性、大小、音效、气泡冷却、气泡主题、外部素材包选择与首次挥手的提示状态。进程内写入经过 `internal/settings.Store`，控制台只合并展示类字段。
-- 外部素材包位于数据目录的 `packs/<id>/`，lockfile 为 `packs.lock.json`，中断安装记录为 `packs.pending.json`。控制台“素材包”页可导入/启用/删除；开发工具仍可用 `go run ./cmd/petpack -zip /path/to/pack.zip`，`-check <dir>` 校验当前 schema 与全部 clip。不要在应用运行时并发执行开发工具导入；它不进入仓库、CI 或安装包。
+- 外部素材包位于数据目录的 `packs/<id>/`，lockfile 为 `packs.lock.json`，中断安装记录为 `packs.pending.json`。控制台“素材包”页可导入/启用/删除；开发工具仍可用 `go run ./cmd/petpack -zip /path/to/pack.zip`，`-check <dir>` 校验当前 schema 与全部 clip，`build <source-dir>` 从 `pack.source.json` 生成 zip，`preview` 输出首帧 PNG。不要在应用运行时并发执行开发工具导入；它不进入仓库、CI 或安装包。作者契约见 [pet-pack-source.md](specs/pet-pack-source.md)。
 - 日志单文件上限 1 MiB，保留 `.1`–`.3` 三份备份；每行先写文件再镜像到 stderr。
 - 窗口位置由 MyGo 按 `StateKey: "main"` 保存到同一数据根。
 - 在应用内“关于”页可直接打开数据目录；菜单“文件 → 打开数据目录”同样可用。

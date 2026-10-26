@@ -166,23 +166,27 @@ func (e Events) Action(name string) string {
 // Manifest is the single pack.json schema. There are no version branches:
 // every pack must declare schema 1 and the current structure.
 type Manifest struct {
-	Schema       int                    `json:"schema"`
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	License      json.RawMessage        `json:"license,omitempty"`
-	Canvas       Size                   `json:"canvas"`
-	Crop         Rect                   `json:"crop"`
-	Base         Base                   `json:"base"`
-	BubbleAnchor Anchor                 `json:"bubbleAnchor"`
-	Clips        map[string]ClipEntry   `json:"clips"`
-	Actions      map[string]Action      `json:"actions"`
-	States       States                 `json:"states"`
-	Events       Events                 `json:"events,omitempty"`
-	Hotzones     []Hotzone              `json:"hotzones,omitempty"`
-	Interactions map[string]Interaction `json:"interactions,omitempty"`
-	Bubbles      map[string][]string    `json:"bubbles,omitempty"`
-	Menu         []MenuEntry            `json:"menu,omitempty"`
-	IdleMotion   string                 `json:"idleMotion,omitempty"`
+	Schema       int             `json:"schema"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	License      json.RawMessage `json:"license,omitempty"`
+	Canvas       Size            `json:"canvas"`
+	Crop         Rect            `json:"crop"`
+	Base         Base            `json:"base"`
+	BubbleAnchor Anchor          `json:"bubbleAnchor"`
+	// BubbleAnchorSet distinguishes an authored (0,0) anchor from a missing
+	// field. Older programmatic manifests leave it false and keep their
+	// non-zero anchor; a decoded explicit zero is preserved.
+	BubbleAnchorSet bool                   `json:"-"`
+	Clips           map[string]ClipEntry   `json:"clips"`
+	Actions         map[string]Action      `json:"actions"`
+	States          States                 `json:"states"`
+	Events          Events                 `json:"events,omitempty"`
+	Hotzones        []Hotzone              `json:"hotzones,omitempty"`
+	Interactions    map[string]Interaction `json:"interactions,omitempty"`
+	Bubbles         map[string][]string    `json:"bubbles,omitempty"`
+	Menu            []MenuEntry            `json:"menu,omitempty"`
+	IdleMotion      string                 `json:"idleMotion,omitempty"`
 }
 
 // HotzoneEntry is a named hotzone in stable display order.
@@ -271,6 +275,11 @@ func decodeManifest(data []byte) (Manifest, error) {
 		}
 		return Manifest{}, err
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return Manifest{}, err
+	}
+	_, manifest.BubbleAnchorSet = fields["bubbleAnchor"]
 	return manifest, nil
 }
 
@@ -561,7 +570,7 @@ func validateManifest(id string, manifest Manifest) error {
 		hasSteps := len(interaction.Steps) > 0
 		hasMotion := interaction.Motion != "" && interaction.Motion != "none"
 		hasBubble := interaction.Bubble != "" && interaction.Bubble != "none"
-		if !hasSteps && !hasMotion && !hasBubble {
+		if !hasSteps && !hasMotion && !hasBubble && !interaction.Sound {
 			return fmt.Errorf("petpack %q interaction %q has no effect", id, interactionID)
 		}
 		if !hasSteps && hasMotion && interaction.ReducedPoster == "" {
