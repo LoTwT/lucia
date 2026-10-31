@@ -497,6 +497,29 @@ func TestPreviewAsyncDropsStaleResults(t *testing.T) {
 	}
 }
 
+func TestPreviewPanelSupportsAsyncOnlyHost(t *testing.T) {
+	model := New(Config{
+		Version:  "0.0.1",
+		DataDir:  "/tmp/lucia",
+		Updates:  updates.New(disabledSource{}, "0.0.1"),
+		Settings: settings.Default(),
+		LoadPacks: func() ([]PackSummary, error) {
+			return []PackSummary{testPack(false)}, nil
+		},
+		LoadPackPreviewAsync: func(string, func([]byte, error)) {},
+	})
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("素材包"); err != nil {
+		t.Fatal(err)
+	}
+	if tt.HasText("当前宿主不提供素材包预览。") {
+		t.Fatalf("async-only host was reported as unsupported; texts: %v", tt.Texts())
+	}
+	if !tt.HasText("正在生成预览…") {
+		t.Fatalf("async-only host did not start a preview; texts: %v", tt.Texts())
+	}
+}
+
 func TestPreviewAsyncRetriesAfterFailure(t *testing.T) {
 	model := New(Config{
 		Version:  "0.0.1",

@@ -270,7 +270,7 @@ func (m *Model) packPreviewPanel(c *ui.Context) {
 }
 
 func (m *Model) packPreviewImage(c *ui.Context) {
-	if m.cfg.LoadPackPreview == nil {
+	if m.cfg.LoadPackPreview == nil && m.cfg.LoadPackPreviewAsync == nil {
 		ui.Text(c, "当前宿主不提供素材包预览。").FontSize(12).TextColor(c.Theme().TextMuted)
 		return
 	}

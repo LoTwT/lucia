@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -93,7 +94,15 @@ func main() {
 	if *activate {
 		settingsStore, _, err := settings.Open(data)
 		if err != nil {
-			log.Fatalf("settings: %v (the pack was imported but not activated; fix the settings file and retry)", err)
+			// A preserved damaged file is not a reason to refuse activation:
+			// Load already moved it to settings.json.bad, and the store may
+			// safely write fresh defaults with the new pack selection. Only a
+			// file that could not be preserved blocks writes for this run.
+			var loadErr *settings.LoadError
+			if !errors.As(err, &loadErr) || loadErr.PreserveErr != nil {
+				log.Fatalf("settings: %v (the pack was imported but not activated; fix the settings path and retry)", err)
+			}
+			log.Printf("settings: %v (continuing with defaults)", err)
 		}
 		if _, err := settingsStore.Update(func(s *settings.Settings) {
 			s.PetPack = pack.Manifest.ID
