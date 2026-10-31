@@ -81,8 +81,13 @@ type Config struct {
 	// ConfirmReplacePackAsync asks before replacing an installed id. done must
 	// be called on the UI thread.
 	ConfirmReplacePackAsync func(id, name string, done func(bool))
-	// ActivatePack switches the running pet and persists petPack.
+	// ActivatePack switches the running pet and persists petPack. It runs on
+	// the UI thread; tests and embedded hosts can use this form.
 	ActivatePack func(id string) error
+	// ActivatePackAsync is the UI-safe form. It should load the pack away from
+	// the UI thread and call done on the UI thread. When set, it takes
+	// precedence over ActivatePack.
+	ActivatePackAsync func(id string, done func(error))
 	// DeletePack removes an inactive pack.
 	DeletePack func(id string) error
 	// ConfirmDeletePack asks before deleting. Nil means no confirmation.
@@ -90,8 +95,13 @@ type Config struct {
 	// ConfirmDeletePackAsync is the UI-safe native dialog form. done must be
 	// called on the UI thread.
 	ConfirmDeletePackAsync func(id, name string, done func(bool))
-	// LoadPackPreview returns a PNG poster for a pack.
+	// LoadPackPreview returns a PNG poster for a pack. It runs on the UI
+	// thread; tests and embedded hosts can use this form.
 	LoadPackPreview func(id string) ([]byte, error)
+	// LoadPackPreviewAsync is the UI-safe form. It should generate the PNG
+	// away from the UI thread and call done on the UI thread. When set, it
+	// takes precedence over LoadPackPreview.
+	LoadPackPreviewAsync func(id string, done func([]byte, error))
 	// OpenPacksDir opens the install directory.
 	OpenPacksDir func() error
 	// RepositoryURL is the public repository opened from the About page.
@@ -127,19 +137,23 @@ type Model struct {
 	petScaleChoice string
 	// Pack management state. Packs are refreshed explicitly so the view
 	// never scans the filesystem on every frame.
-	packs          []PackSummary
-	packsLoaded    bool
-	packsErr       string
-	packSelected   string
-	packZip        string
-	packBusy       bool
-	packPreview    *ui.Bitmap
-	packPreviewID  string
-	packPreviewW   int
-	packPreviewH   int
-	packPreviewErr string
-	packActionErr  string
-	packNotice     string
+	packs         []PackSummary
+	packsLoaded   bool
+	packsErr      string
+	packSelected  string
+	packZip       string
+	packBusy      bool
+	packPreview   *ui.Bitmap
+	packPreviewID string
+	// packPreviewSeq identifies the latest preview request. A callback whose
+	// sequence is no longer current is a stale result and is discarded.
+	packPreviewSeq     uint64
+	packPreviewLoading bool
+	packPreviewW       int
+	packPreviewH       int
+	packPreviewErr     string
+	packActionErr      string
+	packNotice         string
 }
 
 // New creates the window model on the overview page.

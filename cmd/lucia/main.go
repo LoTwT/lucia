@@ -76,13 +76,12 @@ func main() {
 	}
 	log.Printf("lucia: %s data=%q logs=%q", info.LogLine(), paths.Data, paths.Logs)
 
-	prefs, err := settings.Load(paths.Data)
+	settingsStore, prefs, err := settings.Open(paths.Data)
 	if err != nil {
 		log.Printf("lucia: settings: %v (using defaults)", err)
 	}
 	log.Printf("lucia: settings: check updates on launch=%v", prefs.CheckUpdatesOnLaunch)
 	mygo.Theme.SetSource(themeSourceForPreference(prefs.Theme))
-	settingsStore := settings.NewStore(paths.Data, prefs)
 	if petpack.IsReservedPackID(prefs.PetPack) {
 		updated, updateErr := settingsStore.Update(func(s *settings.Settings) { s.PetPack = "" })
 		if updateErr != nil {
@@ -137,7 +136,13 @@ func main() {
 		lastPhase  updates.Phase
 	)
 	petSound := newPetSound()
-	var activatePetPack func(string) error
+	var commitPetPack func(string, *pet.Model) error
+	renderPackPreview := func(id string) ([]byte, error) {
+		if petpack.IsReservedPackID(id) {
+			return builtinpack.Preview(builtinPetPack)
+		}
+		return packStore.Preview(id)
+	}
 	model := appui.New(appui.Config{
 		Version:  info.Version,
 		DataDir:  paths.Data,
@@ -247,13 +252,51 @@ func main() {
 			}()
 		},
 		ActivatePack: func(id string) error {
-			if activatePetPack == nil {
+			if commitPetPack == nil {
 				return fmt.Errorf("应用尚未就绪")
 			}
 			if petpack.IsReservedPackID(id) {
 				id = ""
 			}
-			return activatePetPack(id)
+			next, err := loadPetModel(paths.Data, id, builtinPetPack)
+			if err != nil {
+				return err
+			}
+			return commitPetPack(id, next)
+		},
+		ActivatePackAsync: func(id string, done func(error)) {
+			if commitPetPack == nil {
+				done(fmt.Errorf("应用尚未就绪"))
+				return
+			}
+			if petpack.IsReservedPackID(id) {
+				id = ""
+			}
+			parent := win
+			go func() {
+				// Loading a pack reads and hashes every clip and builds the
+				// animation state. Only the swap back to the UI thread, which
+				// persists the selection and replaces the running model, must
+				// stay on the main loop.
+				next, err := loadPetModel(paths.Data, id, builtinPetPack)
+				if err != nil {
+					if parent != nil && !parent.IsDestroyed() {
+						parent.Update(func() { done(err) })
+					}
+					return
+				}
+				if parent == nil || parent.IsDestroyed() {
+					next.Close()
+					return
+				}
+				parent.Update(func() {
+					if parent.IsDestroyed() {
+						next.Close()
+						return
+					}
+					done(commitPetPack(id, next))
+				})
+			}()
 		},
 		DeletePack: func(id string) error { return packStore.Delete(id) },
 		ConfirmDeletePackAsync: func(id, name string, done func(bool)) {
@@ -276,11 +319,18 @@ func main() {
 				parent.Update(func() { done(err == nil && res.Button == 0) })
 			}()
 		},
-		LoadPackPreview: func(id string) ([]byte, error) {
-			if petpack.IsReservedPackID(id) {
-				return builtinpack.Preview(builtinPetPack)
-			}
-			return packStore.Preview(id)
+		LoadPackPreview: renderPackPreview,
+		LoadPackPreviewAsync: func(id string, done func([]byte, error)) {
+			// Generating a poster decodes the idle frame; keep it off the UI
+			// thread and let the console decode the PNG on the UI thread.
+			parent := win
+			go func() {
+				data, err := renderPackPreview(id)
+				if parent == nil || parent.IsDestroyed() {
+					return
+				}
+				parent.Update(func() { done(data, err) })
+			}()
 		},
 		OpenPacksDir: func() error {
 			if err := os.MkdirAll(packStore.PacksDir(), 0o755); err != nil {
@@ -374,21 +424,7 @@ func main() {
 	}
 	configurePetModel(petModel)
 
-	activatePetPack = func(id string) error {
-		var next *pet.Model
-		var err error
-		if id == "" {
-			next, err = pet.NewAnimated(builtinPetPack)
-		} else {
-			pack, loadErr := petpack.Load(paths.Data, id, 2)
-			if loadErr != nil {
-				return fmt.Errorf("加载素材包 %q：%w", id, loadErr)
-			}
-			next, err = pet.NewAnimated(pack)
-		}
-		if err != nil {
-			return fmt.Errorf("创建桌宠：%w", err)
-		}
+	commitPetPack = func(id string, next *pet.Model) error {
 		next.SetScale(prefs.PetScale)
 		configurePetModel(next)
 		oldID := prefs.PetPack
@@ -643,6 +679,25 @@ func newPetModel(dataDir, packID string, builtin *petpack.Pack) (*pet.Model, boo
 		return nil, fellBack, err
 	}
 	return model, fellBack, nil
+}
+
+// loadPetModel builds an animated model for the selected pack, or for the
+// built-in pack when id is empty. A runtime switch calls it off the UI thread,
+// so it must not touch windows or the settings store.
+func loadPetModel(dataDir, id string, builtin *petpack.Pack) (*pet.Model, error) {
+	pack := builtin
+	if id != "" {
+		loaded, err := petpack.Load(dataDir, id, 2)
+		if err != nil {
+			return nil, fmt.Errorf("加载素材包 %q：%w", id, err)
+		}
+		pack = loaded
+	}
+	model, err := pet.NewAnimated(pack)
+	if err != nil {
+		return nil, fmt.Errorf("创建桌宠：%w", err)
+	}
+	return model, nil
 }
 
 // selfTest reports the identity and updater state of the built artifact.

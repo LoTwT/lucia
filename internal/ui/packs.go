@@ -91,7 +91,7 @@ func (m *Model) packsPage(c *ui.Context) {
 			})
 			if ui.Button(c, "刷新").Disabled(m.packBusy).Clicked() {
 				m.packsLoaded = false
-				m.packPreviewID = ""
+				m.invalidatePackPreview()
 				m.packActionErr = ""
 				m.refreshPacks()
 			}
@@ -153,7 +153,7 @@ func (m *Model) packRow(c *ui.Context, pack PackSummary) {
 				m.packSelected = pack.ID
 				m.loadPackPreview()
 			}
-			if pack.Valid && !pack.Active && m.cfg.ActivatePack != nil {
+			if pack.Valid && !pack.Active && (m.cfg.ActivatePack != nil || m.cfg.ActivatePackAsync != nil) {
 				if ui.PrimaryButton(c, "启用").Disabled(m.packBusy).Clicked() {
 					m.activatePack(pack.ID)
 				}
@@ -270,7 +270,7 @@ func (m *Model) packPreviewPanel(c *ui.Context) {
 }
 
 func (m *Model) packPreviewImage(c *ui.Context) {
-	if m.cfg.LoadPackPreview == nil {
+	if m.cfg.LoadPackPreview == nil && m.cfg.LoadPackPreviewAsync == nil {
 		ui.Text(c, "当前宿主不提供素材包预览。").FontSize(12).TextColor(c.Theme().TextMuted)
 		return
 	}
@@ -366,19 +366,53 @@ func (m *Model) activePackID() string {
 }
 
 func (m *Model) loadPackPreview() {
-	if m.packSelected == "" || m.cfg.LoadPackPreview == nil {
-		m.packPreview = nil
-		m.packPreviewID = ""
-		m.packPreviewErr = ""
+	if m.packSelected == "" || (m.cfg.LoadPackPreview == nil && m.cfg.LoadPackPreviewAsync == nil) {
+		m.invalidatePackPreview()
 		return
 	}
-	if m.packPreviewID == m.packSelected && m.packPreview != nil && m.packPreviewErr == "" {
-		return
+	if m.packPreviewID == m.packSelected {
+		// The in-flight request will deliver this selection; a usable bitmap
+		// needs no reload. Only a reported failure is retried.
+		if m.packPreviewLoading || (m.packPreview != nil && m.packPreviewErr == "") {
+			return
+		}
 	}
-	m.packPreviewID = m.packSelected
+	id := m.packSelected
+	m.packPreviewID = id
 	m.packPreview = nil
 	m.packPreviewErr = ""
-	data, err := m.cfg.LoadPackPreview(m.packSelected)
+	m.packPreviewSeq++
+	seq := m.packPreviewSeq
+	if m.cfg.LoadPackPreviewAsync != nil {
+		m.packPreviewLoading = true
+		m.cfg.LoadPackPreviewAsync(id, func(data []byte, err error) {
+			if seq != m.packPreviewSeq {
+				return
+			}
+			m.packPreviewLoading = false
+			m.applyPackPreview(data, err)
+		})
+		return
+	}
+	m.packPreviewLoading = false
+	m.applyPackPreview(m.cfg.LoadPackPreview(id))
+}
+
+// invalidatePackPreview drops the current poster and makes any in-flight
+// request stale, so a result for a previous selection cannot land later.
+func (m *Model) invalidatePackPreview() {
+	m.packPreviewSeq++
+	m.packPreview = nil
+	m.packPreviewID = ""
+	m.packPreviewW, m.packPreviewH = 0, 0
+	m.packPreviewErr = ""
+	m.packPreviewLoading = false
+}
+
+// applyPackPreview decodes a generated poster on the UI thread. Generation is
+// off-thread, but ui.DecodeBitmap must stay here so the bitmap is owned by the
+// UI thread.
+func (m *Model) applyPackPreview(data []byte, err error) {
 	if err != nil {
 		m.packPreviewErr = fmt.Sprintf("生成预览失败：%v", err)
 		return
@@ -489,47 +523,84 @@ func (m *Model) finishInstall(previousActive string, pack PackSummary, err error
 		m.packActionErr = fmt.Sprintf("导入素材包失败：%v", err)
 		return
 	}
-	m.packBusy = false
 	m.packActionErr = ""
 	m.packNotice = fmt.Sprintf("已导入 %s，正在启用…", pack.Name)
+	m.invalidatePackPreview()
 	m.packSelected = pack.ID
-	if err := m.activatePackBackend(pack.ID); err != nil {
-		m.packActionErr = fmt.Sprintf("素材包已导入，但启用失败：%v", err)
-		m.packNotice = fmt.Sprintf("已导入 %s，但未启用。", pack.Name)
-		if strings.EqualFold(previousActive, pack.ID) {
-			if fallbackErr := m.activatePackBackend(""); fallbackErr != nil {
-				m.packActionErr += fmt.Sprintf("；回退内置鲸鱼也失败：%v", fallbackErr)
-			} else {
-				m.packActionErr += "；已切回内置鲸鱼，旧素材包不再被运行中的模型占用"
-				m.packNotice = fmt.Sprintf("已导入 %s，但启用失败；已切回内置鲸鱼。", pack.Name)
+	m.activateInstalled(previousActive, pack)
+}
+
+// activateInstalled enables a freshly installed pack while the import stays
+// busy. It keeps the original fallback: a failed activation of a replaced pack
+// switches back to the built-in whale so no running model holds the old files.
+func (m *Model) activateInstalled(previousActive string, pack PackSummary) {
+	m.activatePackBackend(pack.ID, func(activateErr error) {
+		if activateErr != nil {
+			m.packActionErr = fmt.Sprintf("素材包已导入，但启用失败：%v", activateErr)
+			m.packNotice = fmt.Sprintf("已导入 %s，但未启用。", pack.Name)
+			if strings.EqualFold(previousActive, pack.ID) {
+				m.activatePackBackend("", func(fallbackErr error) {
+					if fallbackErr != nil {
+						m.packActionErr += fmt.Sprintf("；回退内置鲸鱼也失败：%v", fallbackErr)
+					} else {
+						m.packActionErr += "；已切回内置鲸鱼，旧素材包不再被运行中的模型占用"
+						m.packNotice = fmt.Sprintf("已导入 %s，但启用失败；已切回内置鲸鱼。", pack.Name)
+					}
+					m.finishPackChange()
+				})
+				return
 			}
+		} else {
+			m.packNotice = fmt.Sprintf("已导入并启用 %s。", pack.Name)
 		}
-	} else {
-		m.packNotice = fmt.Sprintf("已导入并启用 %s。", pack.Name)
-	}
+		m.finishPackChange()
+	})
+}
+
+// finishPackChange clears the busy state and reloads the list after an import
+// and its activation both completed.
+func (m *Model) finishPackChange() {
+	m.packBusy = false
 	m.packZip = ""
 	m.packsLoaded = false
-	m.packPreviewID = ""
+	m.invalidatePackPreview()
 	m.refreshPacks()
 }
 
 func (m *Model) activatePack(id string) {
-	if err := m.activatePackBackend(id); err != nil {
-		m.packActionErr = fmt.Sprintf("启用素材包失败：%v", err)
+	if m.packBusy {
 		return
 	}
+	m.packBusy = true
 	m.packActionErr = ""
-	m.packNotice = "已切换素材包；桌宠窗口会立即使用新皮肤。"
-	m.packSelected = id
-	m.packsLoaded = false
-	m.refreshPacks()
+	m.packNotice = ""
+	m.activatePackBackend(id, func(err error) {
+		m.packBusy = false
+		if err != nil {
+			m.packActionErr = fmt.Sprintf("启用素材包失败：%v", err)
+			return
+		}
+		m.packActionErr = ""
+		m.packNotice = "已切换素材包；桌宠窗口会立即使用新皮肤。"
+		m.packSelected = id
+		m.packsLoaded = false
+		m.refreshPacks()
+	})
 }
 
-func (m *Model) activatePackBackend(id string) error {
-	if m.cfg.ActivatePack == nil {
-		return nil
+// activatePackBackend requests an activation and calls done exactly once, on
+// the UI thread. Hosts that load packs asynchronously report through done
+// later; synchronous hosts call it inline.
+func (m *Model) activatePackBackend(id string, done func(error)) {
+	if m.cfg.ActivatePackAsync != nil {
+		m.cfg.ActivatePackAsync(id, done)
+		return
 	}
-	return m.cfg.ActivatePack(id)
+	if m.cfg.ActivatePack == nil {
+		done(nil)
+		return
+	}
+	done(m.cfg.ActivatePack(id))
 }
 
 func (m *Model) deletePack(id string) {
@@ -543,6 +614,7 @@ func (m *Model) deletePack(id string) {
 	m.packActionErr = ""
 	m.packNotice = "素材包已删除。"
 	if m.packSelected == id {
+		m.invalidatePackPreview()
 		m.packSelected = ""
 	}
 	remaining := m.packs[:0]

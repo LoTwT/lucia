@@ -4,8 +4,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LoTwT/lucia/internal/builtinpack"
 	"github.com/LoTwT/lucia/internal/petpack"
 )
+
+func TestLoadPetModelBuildsBuiltinAndReportsMissingPacks(t *testing.T) {
+	builtin, err := builtinpack.Load(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := loadPetModel(t.TempDir(), "", builtin)
+	if err != nil {
+		t.Fatalf("load the built-in pack: %v", err)
+	}
+	model.Close()
+	if _, err := loadPetModel(t.TempDir(), "missing", builtin); err == nil {
+		t.Fatal("a missing external pack did not report an error")
+	}
+}
 
 func TestUIPackSummaryMapsInteractionData(t *testing.T) {
 	summary := petpack.Summary{

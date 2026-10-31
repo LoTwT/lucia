@@ -1,6 +1,9 @@
 package settings
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
 
 // Store is the process-wide owner of the persisted preferences. Callers
 // mutate fields through Update so a stale copy cannot overwrite unrelated
@@ -9,12 +12,29 @@ type Store struct {
 	mu      sync.Mutex
 	dir     string
 	current Settings
+	// writeErr makes Update fail without touching the file. It is set when
+	// Load could not move a damaged settings file aside, so this run must not
+	// replace the only copy.
+	writeErr error
 }
 
 // NewStore returns a store containing initial. The caller is responsible for
 // loading initial from disk before constructing the store.
 func NewStore(dir string, initial Settings) *Store {
 	return &Store{dir: dir, current: initial}
+}
+
+// Open loads the settings in dir and returns the store that owns them. A
+// damaged file yields the defaults; when it could not be preserved, every
+// Update fails with the returned reason instead of overwriting the original.
+func Open(dir string) (*Store, Settings, error) {
+	initial, err := Load(dir)
+	store := NewStore(dir, initial)
+	var loadErr *LoadError
+	if errors.As(err, &loadErr) && loadErr.PreserveErr != nil {
+		store.writeErr = loadErr
+	}
+	return store, initial, err
 }
 
 // Snapshot returns the current settings. Settings contains only value fields,
@@ -30,6 +50,9 @@ func (s *Store) Snapshot() Settings {
 func (s *Store) Update(change func(*Settings)) (Settings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.writeErr != nil {
+		return s.current, s.writeErr
+	}
 	if change == nil {
 		return s.current, nil
 	}
