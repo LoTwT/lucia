@@ -33,7 +33,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 3. 调用 `mygo.App.SetPath` 覆盖 `PathUserData`、`PathCache`、`PathLogs`，让框架自己的状态（窗口位置、更新状态）与应用文件落在同一根目录。覆盖必须在 `Run` 前完成。
 4. `RequestSingleInstanceLock`；第二个实例把命令行交给第一个实例后直接退出，不接触日志与数据文件。
 5. 打开诊断日志，写入首行 `version=… commit=… platform=… data=… logs=…`。打不开日志不阻止启动。
-6. 读取设置，应用保存的应用主题（`mygo.Theme.SetSource`），并构造进程内唯一的 `settings.Store`。文件缺失用默认值；文件损坏记录原因并继续用默认值。
+6. 读取设置，应用保存的应用主题（`mygo.Theme.SetSource`），并构造进程内唯一的 `settings.Store`。文件缺失用默认值；文件损坏时先改名为 `settings.json.bad` 并记录原因，再继续用默认值；改名失败时本次运行拒绝写入设置，避免覆盖唯一副本。
 7. 构造 `petpack.Store`，先执行 `Recover` 清理中断的导入、恢复 `.backup`、重建 lockfile，再把 `petPack` 写入 active；构造更新管理器，把 `CheckUpdatesOnLaunch` 同步到管理器的自动检查开关；加载内嵌鲸鱼包，再构造桌宠模型：`petPack` 非空时从 `<数据目录>/packs/<id>` 加载外部包，失败则记录日志、退回内嵌包并清除 active 选择，避免控制台状态与桌面不一致。动画包在后台解码 idle 缓存，首帧海报立即可见。
 8. 注册单实例、激活、`lucia://` 深链接、退出前与最后窗口关闭回调；设置应用菜单。
 9. `WhenReady` 中创建桌宠窗口、默认隐藏的气泡窗口与默认隐藏的控制台窗口，创建托盘，接上管理器的重绘与安装完成回调，再启动自动检查循环。
@@ -51,7 +51,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 
 开发运行由 MyGo 命名为 `Lucia Dev`，因此数据、日志、窗口状态与正式版天然隔离。Windows 使用 `%LOCALAPPDATA%` 而不是漫游 `%APPDATA%`：更新状态与本地数据不应被漫游配置文件或组织策略跨机器同步。
 
-设置文件为数据目录下的 `settings.json`，采用临时文件加改名写入，崩溃不会留下半个 JSON。加载时先取 `Default()` 再反序列化，旧文件缺少新字段时保留默认值。当前持久化 `checkUpdatesOnLaunch`、`theme`、`petVisible`、`petScale`、`soundEnabled`、`bubbleCooldownSeconds`、`bubbleTheme`、`petPack` 与 `petIntroPlayed`；开机自启由 MyGo 的登录项接口管理，不重复落盘。进程内所有写入都经过 `settings.Store.Update`；控制台只合并展示类字段，桌宠运行时拥有的 `petPack`/`petIntroPlayed` 不会被旧副本覆盖。窗口位置由 MyGo 按 `StateKey` 存在同一数据根：控制台为 `"main"`，桌宠为 `"pet"`，气泡不设 `StateKey`。外部素材包位于 `<数据目录>/packs/<id>/`，由控制台或 `cmd/petpack` 导入；它不属于窗口状态，也不进入仓库或安装包。
+设置文件为数据目录下的 `settings.json`，采用临时文件加改名写入，崩溃不会留下半个 JSON。加载时先取 `Default()` 再反序列化，旧文件缺少新字段时保留默认值。读取或解析失败时先把原文件改名为 `settings.json.bad`（覆盖上一份）再使用默认值；改名也失败时 `Store.Update` 直接返回错误且不写盘，避免覆盖唯一副本。当前持久化 `checkUpdatesOnLaunch`、`theme`、`petVisible`、`petScale`、`soundEnabled`、`bubbleCooldownSeconds`、`bubbleTheme`、`petPack` 与 `petIntroPlayed`；开机自启由 MyGo 的登录项接口管理，不重复落盘。进程内所有写入都经过 `settings.Store.Update`；控制台只合并展示类字段，桌宠运行时拥有的 `petPack`/`petIntroPlayed` 不会被旧副本覆盖。窗口位置由 MyGo 按 `StateKey` 存在同一数据根：控制台为 `"main"`，桌宠为 `"pet"`，气泡不设 `StateKey`。外部素材包位于 `<数据目录>/packs/<id>/`，由控制台或 `cmd/petpack` 导入；它不属于窗口状态，也不进入仓库或安装包。
 
 ## 3.1 素材包
 
@@ -63,7 +63,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 - 解码：`internal/petpack` 解析 WebP RIFF/ANMF，使用 `golang.org/x/image/webp` decode 单帧，再按 blend/dispose 顺序合成；不引入 cgo。每帧保留自身时长，支持特殊动作的长停顿帧。
 - 播放：`internal/pet` 的动画状态机按 UI 时钟推进 `enter → loop → exit`；idle 预解码缓存，其他 clip 在 UI 线程顺序解码。缓存为后台工作，不驱动 UI。Reduce Motion 使用 `reducedPoster`。
 - 安装：控制台和 `cmd/petpack` 共用导入器。读取 zip 中任意层级最浅的 `pack.json`/`pack.meta.json`（4 MiB 上限），优先使用带 CRC32 校验的 0x7075 Unicode Path，回退 GBK；只接受 `.webp`，跳过 `__MACOSX/` 与 `._*` 资源叉，限制单文件 64 MiB、总量 512 MiB，写临时目录后备份旧包、安装并校验，失败回滚。`Store.Install(zip, replace)` 仅在同名且未请求替换时返回 `PackExistsError`，此时没有写入；控制台据此弹出确认。授权不再作为导入门槛。
-- 控制台：素材包页列出内嵌包与有效/无效的用户包、clip/帧/热区/交互数量与授权状态，生成海报预览、叠加热区，并列出交互步骤与动作停留时序；内嵌包只读。导入在后台执行并回到 UI 线程切换新模型，失败则保留旧模型和旧设置；替换正在使用的包后若启用失败，会切回内置包。预览仍在 UI 线程执行。运行中的应用与 `cmd/petpack` 不能并发导入（只有进程内互斥）。
+- 控制台：素材包页列出内嵌包与有效/无效的用户包、clip/帧/热区/交互数量与授权状态，生成海报预览、叠加热区，并列出交互步骤与动作停留时序；内嵌包只读。导入、启用与预览的昂贵部分（读取并校验全部 clip、构建动画模型、生成海报 PNG）都在后台执行，再经 `Window.Update` 回到 UI 线程：启用依次写 `SetActive`、设置与模型，失败则保留旧模型和旧设置；替换正在使用的包后若启用失败，会切回内置包。预览用请求序号丢弃过期结果，PNG 解码仍在 UI 线程执行；启用期间控制台按钮禁用，窗口销毁时放弃回调。运行中的应用与 `cmd/petpack` 不能并发导入（只有进程内互斥）。
 - 回退：manifest/解码/海报任一失败都记录日志并使用内嵌包，并清除失效的 active 选择；可选素材不能阻止应用启动。
 - 分发：naiwa 等外部素材不进入 Git、CI、DMG/NSIS 或发布资产；授权由用户本地确认。
 

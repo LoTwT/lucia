@@ -246,6 +246,28 @@ func TestImportPackAsyncKeepsBusyUntilCompletion(t *testing.T) {
 	}
 }
 
+func TestImportPackAsyncStaysBusyThroughAsyncActivation(t *testing.T) {
+	model, _, _ := newPacksTestModel(t, nil)
+	var installDone func(PackSummary, error)
+	model.cfg.InstallPackAsync = func(_ string, _ bool, callback func(PackSummary, error)) {
+		installDone = callback
+	}
+	var activateDone func(error)
+	model.cfg.ActivatePackAsync = func(_ string, callback func(error)) {
+		activateDone = callback
+	}
+	model.packZip = "tiny.zip"
+	model.importPack()
+	installDone(testPack(true), nil)
+	if !model.packBusy || activateDone == nil {
+		t.Fatalf("busy=%v activation callback=%v", model.packBusy, activateDone != nil)
+	}
+	activateDone(nil)
+	if model.packBusy || model.packNotice == "" {
+		t.Fatalf("busy=%v notice=%q", model.packBusy, model.packNotice)
+	}
+}
+
 func TestImportPackAsyncConfirmsReplacement(t *testing.T) {
 	model, _, activations := newPacksTestModel(t, []PackSummary{testPack(true)})
 	var completions []func(PackSummary, error)
@@ -387,6 +409,118 @@ func TestPreviewRetriesAfterFailure(t *testing.T) {
 	model.loadPackPreview()
 	if model.packPreview == nil || model.packPreviewErr != "" || attempts != 2 {
 		t.Fatalf("attempts=%d preview=%v err=%q", attempts, model.packPreview != nil, model.packPreviewErr)
+	}
+}
+
+func TestActivatePackAsyncKeepsBusyUntilCompletion(t *testing.T) {
+	model, _, _ := newPacksTestModel(t, []PackSummary{testPack(false)})
+	model.refreshPacks()
+	var done func(error)
+	model.cfg.ActivatePackAsync = func(id string, callback func(error)) {
+		if id != "tiny" {
+			t.Fatalf("activation id = %q, want tiny", id)
+		}
+		done = callback
+	}
+	model.activatePack("tiny")
+	if !model.packBusy || done == nil {
+		t.Fatalf("busy=%v callback=%v", model.packBusy, done != nil)
+	}
+	done(nil)
+	if model.packBusy || model.packNotice == "" || model.packSelected != "tiny" {
+		t.Fatalf("busy=%v notice=%q selected=%q", model.packBusy, model.packNotice, model.packSelected)
+	}
+}
+
+func TestActivatePackAsyncClearsBusyOnFailure(t *testing.T) {
+	model, _, _ := newPacksTestModel(t, []PackSummary{testPack(false)})
+	model.refreshPacks()
+	model.cfg.ActivatePackAsync = func(_ string, callback func(error)) {
+		callback(errors.New("boom"))
+	}
+	model.activatePack("tiny")
+	if model.packBusy || model.packActionErr == "" {
+		t.Fatalf("busy=%v err=%q", model.packBusy, model.packActionErr)
+	}
+}
+
+func TestPacksPageOffersEnableWithAsyncActivator(t *testing.T) {
+	model := New(Config{
+		Version:  "0.0.1",
+		DataDir:  "/tmp/lucia",
+		Updates:  updates.New(disabledSource{}, "0.0.1"),
+		Settings: settings.Default(),
+		LoadPacks: func() ([]PackSummary, error) {
+			return []PackSummary{testPack(false)}, nil
+		},
+		ActivatePackAsync: func(string, func(error)) {},
+	})
+	tt := ui.NewTester(model.View, 1000, 700)
+	if err := tt.Click("素材包"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("启用"); err != nil {
+		t.Fatalf("async activator did not render the enable action: %v", err)
+	}
+}
+
+func TestPreviewAsyncDropsStaleResults(t *testing.T) {
+	model := New(Config{
+		Version:  "0.0.1",
+		DataDir:  "/tmp/lucia",
+		Updates:  updates.New(disabledSource{}, "0.0.1"),
+		Settings: settings.Default(),
+	})
+	var callbacks []func([]byte, error)
+	model.cfg.LoadPackPreviewAsync = func(_ string, done func([]byte, error)) {
+		callbacks = append(callbacks, done)
+	}
+	model.packSelected = "tiny"
+	model.loadPackPreview()
+	model.loadPackPreview()
+	if len(callbacks) != 1 || !model.packPreviewLoading {
+		t.Fatalf("callbacks=%d loading=%v, want one in-flight request", len(callbacks), model.packPreviewLoading)
+	}
+
+	model.packSelected = "other"
+	model.loadPackPreview()
+	if len(callbacks) != 2 || !model.packPreviewLoading {
+		t.Fatalf("callbacks=%d loading=%v, want a second request", len(callbacks), model.packPreviewLoading)
+	}
+	callbacks[0](previewPNG(t), nil)
+	if model.packPreview != nil {
+		t.Fatal("a stale preview replaced the current selection")
+	}
+	callbacks[1](previewPNG(t), nil)
+	if model.packPreview == nil || model.packPreviewErr != "" || model.packPreviewLoading {
+		t.Fatalf("preview=%v err=%q loading=%v", model.packPreview != nil, model.packPreviewErr, model.packPreviewLoading)
+	}
+}
+
+func TestPreviewAsyncRetriesAfterFailure(t *testing.T) {
+	model := New(Config{
+		Version:  "0.0.1",
+		DataDir:  "/tmp/lucia",
+		Updates:  updates.New(disabledSource{}, "0.0.1"),
+		Settings: settings.Default(),
+	})
+	var callbacks []func([]byte, error)
+	model.cfg.LoadPackPreviewAsync = func(_ string, done func([]byte, error)) {
+		callbacks = append(callbacks, done)
+	}
+	model.packSelected = "tiny"
+	model.loadPackPreview()
+	callbacks[0](nil, errors.New("temporary failure"))
+	if model.packPreviewErr == "" || model.packPreviewLoading {
+		t.Fatalf("err=%q loading=%v", model.packPreviewErr, model.packPreviewLoading)
+	}
+	model.loadPackPreview()
+	if len(callbacks) != 2 {
+		t.Fatalf("callbacks=%d, want a retry after a reported failure", len(callbacks))
+	}
+	callbacks[1](previewPNG(t), nil)
+	if model.packPreview == nil || model.packPreviewErr != "" {
+		t.Fatalf("preview=%v err=%q", model.packPreview != nil, model.packPreviewErr)
 	}
 }
 

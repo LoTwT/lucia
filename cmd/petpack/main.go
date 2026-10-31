@@ -91,18 +91,15 @@ func main() {
 		log.Fatalf("refresh pack lockfile: %v", err)
 	}
 	if *activate {
-		prefs, err := settings.Load(data)
+		settingsStore, _, err := settings.Open(data)
 		if err != nil {
 			log.Fatalf("settings: %v (the pack was imported but not activated; fix the settings file and retry)", err)
 		}
-		settingsStore := settings.NewStore(data, prefs)
-		updated, err := settingsStore.Update(func(s *settings.Settings) {
+		if _, err := settingsStore.Update(func(s *settings.Settings) {
 			s.PetPack = pack.Manifest.ID
-		})
-		if err != nil {
+		}); err != nil {
 			log.Fatal(err)
 		}
-		prefs = updated
 		if err := store.SetActive(pack.Manifest.ID); err != nil {
 			log.Fatal(err)
 		}

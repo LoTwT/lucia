@@ -14,6 +14,11 @@ import (
 // File is the settings file's name in the data directory.
 const File = "settings.json"
 
+// BadFile is where an unusable settings file is moved. Keeping the bytes
+// preserves manual edits and makes the failure diagnosable after the app has
+// written fresh defaults.
+const BadFile = File + ".bad"
+
 // Theme values persisted in Settings.Theme and Settings.BubbleTheme.
 const (
 	ThemeSystem = "system"
@@ -71,8 +76,31 @@ func Default() Settings {
 	}
 }
 
+// LoadError reports why the persisted settings could not be used. BadPath
+// names the preserved copy when the original was moved aside. PreserveErr is
+// set when it could not be moved; the original then holds the only copy and
+// the caller's store must not write over it.
+type LoadError struct {
+	Path        string
+	BadPath     string
+	Cause       error
+	PreserveErr error
+}
+
+func (e *LoadError) Error() string {
+	if e.PreserveErr != nil {
+		return fmt.Sprintf("%s: %v (could not move it to %q: %v; refusing to overwrite it this run)",
+			e.Path, e.Cause, e.BadPath, e.PreserveErr)
+	}
+	return fmt.Sprintf("%s: %v (kept the original as %q)", e.Path, e.Cause, e.BadPath)
+}
+
+// Unwrap reports the read or parse failure that made the file unusable.
+func (e *LoadError) Unwrap() error { return e.Cause }
+
 // Load reads the settings in dir. A missing file returns the defaults and
-// no error; an unreadable or invalid file returns the defaults and the
+// no error. An unreadable or invalid file is moved to File+".bad" so a later
+// save cannot destroy the only copy, and the defaults are returned with the
 // reason, which the caller logs while continuing with the defaults.
 func Load(dir string) (Settings, error) {
 	path := filepath.Join(dir, File)
@@ -81,13 +109,13 @@ func Load(dir string) (Settings, error) {
 		if os.IsNotExist(err) {
 			return Default(), nil
 		}
-		return Default(), fmt.Errorf("read %q: %w", path, err)
+		return preserveDamaged(path, fmt.Errorf("read: %w", err))
 	}
 	// Start from defaults so fields added after an older file was written
 	// keep their intended default instead of decoding as the zero value.
 	s := Default()
 	if err := json.Unmarshal(data, &s); err != nil {
-		return Default(), fmt.Errorf("parse %q: %w", path, err)
+		return preserveDamaged(path, fmt.Errorf("parse: %w", err))
 	}
 	if s.PetScale <= 0 {
 		s.PetScale = 1.0
@@ -95,6 +123,19 @@ func Load(dir string) (Settings, error) {
 	s.Theme = normalizeTheme(s.Theme)
 	s.BubbleTheme = normalizeTheme(s.BubbleTheme)
 	return s, nil
+}
+
+// preserveDamaged moves an unusable file aside before the defaults take over.
+// The rename intentionally replaces an older .bad copy: the newest failure is
+// the one worth diagnosing. A failed rename leaves the original in place and
+// is reported in LoadError.PreserveErr so the store can stay read-only.
+func preserveDamaged(path string, cause error) (Settings, error) {
+	bad := filepath.Join(filepath.Dir(path), BadFile)
+	loadErr := &LoadError{Path: path, BadPath: bad, Cause: cause}
+	if err := os.Rename(path, bad); err != nil {
+		loadErr.PreserveErr = err
+	}
+	return Default(), loadErr
 }
 
 func normalizeTheme(theme string) string {

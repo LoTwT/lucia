@@ -147,6 +147,101 @@ func TestLoadDamagedFileFallsBackToDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadDamagedFilePreservesTheOriginal(t *testing.T) {
+	dir := t.TempDir()
+	original := []byte("{not json")
+	if err := os.WriteFile(filepath.Join(dir, File), original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatal("Load accepted a damaged file without reporting it")
+	}
+	if _, err := os.Stat(filepath.Join(dir, File)); !os.IsNotExist(err) {
+		t.Fatalf("damaged settings file still exists at its original path: %v", err)
+	}
+	preserved, err := os.ReadFile(filepath.Join(dir, BadFile))
+	if err != nil {
+		t.Fatalf("read preserved file: %v", err)
+	}
+	if string(preserved) != string(original) {
+		t.Fatalf("preserved settings = %q, want the original bytes %q", preserved, original)
+	}
+}
+
+func TestLoadUnreadableFilePreservesTheOriginal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, File), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatal("Load accepted an unreadable settings path without reporting it")
+	}
+	info, err := os.Stat(filepath.Join(dir, BadFile))
+	if err != nil {
+		t.Fatalf("unreadable settings path was not preserved: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("preserved path is not the directory that occupied %s", File)
+	}
+	if _, err := os.Stat(filepath.Join(dir, File)); !os.IsNotExist(err) {
+		t.Fatalf("unreadable settings path still exists at its original location: %v", err)
+	}
+}
+
+func TestOpenWritesAfterPreservingDamagedFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, File), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, _, err := Open(dir)
+	if err == nil {
+		t.Fatal("Open accepted a damaged file without reporting it")
+	}
+	got, err := store.Update(func(s *Settings) { s.SoundEnabled = true })
+	if err != nil {
+		t.Fatalf("Update after a successful preserve: %v", err)
+	}
+	if !got.SoundEnabled {
+		t.Fatalf("updated settings = %+v, want sound enabled", got)
+	}
+}
+
+func TestOpenRefusesWritesWhenTheOriginalCannotBePreserved(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, File), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Renaming a file onto an existing non-empty directory fails on both
+	// Unix and Windows, which models a read-only or locked data directory.
+	blocked := filepath.Join(dir, BadFile)
+	if err := os.Mkdir(blocked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "keep"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, got, err := Open(dir)
+	if err == nil {
+		t.Fatal("Open did not report that the original could not be preserved")
+	}
+	if !got.CheckUpdatesOnLaunch || !got.PetVisible {
+		t.Fatalf("Open did not fall back to the defaults: %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, File)); err != nil {
+		t.Fatalf("the unpreserved settings path was removed: %v", err)
+	}
+	updated, err := store.Update(func(s *Settings) { s.SoundEnabled = true })
+	if err == nil {
+		t.Fatal("Update wrote over a settings file that could not be preserved")
+	}
+	if updated.SoundEnabled || store.Snapshot().SoundEnabled {
+		t.Fatalf("blocked update changed the settings: %+v", updated)
+	}
+	if _, err := os.Stat(filepath.Join(dir, File)); err != nil {
+		t.Fatalf("the unpreserved settings path was removed by a blocked update: %v", err)
+	}
+}
+
 func TestStoreUpdatePreservesFieldsOwnedElsewhere(t *testing.T) {
 	dir := t.TempDir()
 	initial := Default()

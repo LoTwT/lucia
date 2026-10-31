@@ -3,8 +3,10 @@ package petpack
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"hash/crc32"
 	"image"
@@ -151,6 +153,44 @@ func TestImportZip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(packsRoot, "tiny", "clips", "idle_loop.webp")); err != nil {
 		t.Fatalf("imported clip: %v", err)
+	}
+}
+
+func TestParseImportedClipReleasesBytesAndKeepsDigest(t *testing.T) {
+	dir := t.TempDir()
+	data, err := os.ReadFile("testdata/tiny.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "tiny.webp"
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clip, entry, err := parseImportedClip("tiny", os.DirFS(dir), name, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clip.data != nil {
+		t.Fatal("the imported clip still holds its bytes")
+	}
+	want := sha256.Sum256(data)
+	if entry.SHA256 != hex.EncodeToString(want[:]) || entry.Frames != 3 {
+		t.Fatalf("entry = %+v, want the source hash and 3 frames", entry)
+	}
+	if _, err := clip.AlphaBounds(); err != nil {
+		t.Fatalf("alpha bounds after releasing the bytes: %v", err)
+	}
+
+	// The file is read again for later passes, so the digest must notice a
+	// replacement instead of decoding different artwork.
+	tampered := append([]byte(nil), data...)
+	tampered[len(tampered)-1] ^= 0xff
+	if err := os.WriteFile(path, tampered, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := clip.AlphaBounds(); err == nil {
+		t.Fatal("a changed clip file was accepted after the bytes were released")
 	}
 }
 

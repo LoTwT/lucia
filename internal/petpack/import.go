@@ -11,6 +11,7 @@ import (
 	"hash/crc32"
 	"image"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -151,7 +152,7 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 			return nil, fmt.Errorf("petpack import: archive exceeds the total limit")
 		}
 		dest := filepath.Join(clipsDir, clipID+".webp")
-		entry, data, err := extractZipFile(file, dest)
+		data, err := extractZipFile(file, dest)
 		if err != nil {
 			return nil, fmt.Errorf("petpack import: %q: %w", name, err)
 		}
@@ -159,17 +160,17 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 		if actualTotal > maxImportTotal {
 			return nil, fmt.Errorf("petpack import: extracted data exceeds the total limit")
 		}
-		clip, err := ParseClip(clipID, data)
+		clip, entry, err := parseImportedClip(clipID, os.DirFS(clipsDir), clipID+".webp", data)
 		if err != nil {
 			return nil, fmt.Errorf("petpack import: %q: %w", name, err)
 		}
+		data = nil
 		if canvas.Width == 0 {
 			canvas = Size{Width: clip.Width, Height: clip.Height}
 		} else if canvas.Width != clip.Width || canvas.Height != clip.Height {
 			return nil, fmt.Errorf("petpack import: %q has canvas %dx%d, want %dx%d",
 				name, clip.Width, clip.Height, canvas.Width, canvas.Height)
 		}
-		entry.Frames = clip.FrameCount()
 		entry.File = "clips/" + clipID + ".webp"
 		imported[clipID] = importedClip{clip: clip, entry: entry}
 	}
@@ -337,24 +338,44 @@ func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	return pack, nil
 }
 
-func extractZipFile(file *zip.File, dest string) (ClipEntry, []byte, error) {
+func extractZipFile(file *zip.File, dest string) ([]byte, error) {
 	reader, err := file.Open()
 	if err != nil {
-		return ClipEntry{}, nil, err
+		return nil, err
 	}
 	defer reader.Close()
 	data, err := io.ReadAll(io.LimitReader(reader, maxImportFile+1))
 	if err != nil {
-		return ClipEntry{}, nil, err
+		return nil, err
 	}
 	if len(data) > maxImportFile {
-		return ClipEntry{}, nil, fmt.Errorf("file exceeds the per-file limit")
+		return nil, fmt.Errorf("file exceeds the per-file limit")
 	}
 	if err := os.WriteFile(dest, data, 0o644); err != nil {
-		return ClipEntry{}, nil, err
+		return nil, err
+	}
+	return data, nil
+}
+
+// parseImportedClip parses one clip that was extracted to fsys under name and
+// then drops its bytes. Later passes such as AlphaBounds re-read the file, so
+// an import never holds every clip's artwork at once; the digest rejects a
+// file that changed between the two reads.
+func parseImportedClip(id string, fsys fs.FS, name string, data []byte) (*Clip, ClipEntry, error) {
+	clip, err := ParseClip(id, data)
+	if err != nil {
+		return nil, ClipEntry{}, err
 	}
 	sum := sha256.Sum256(data)
-	return ClipEntry{SHA256: hex.EncodeToString(sum[:])}, data, nil
+	clip.fsys = fsys
+	clip.name = name
+	clip.data = nil
+	clip.digest = sum
+	clip.hasDigest = true
+	return clip, ClipEntry{
+		Frames: clip.FrameCount(),
+		SHA256: hex.EncodeToString(sum[:]),
+	}, nil
 }
 
 // zipEntryName prefers the 0x7075 Unicode Path extra field. Go's archive/zip
