@@ -79,9 +79,10 @@ func newPetWindow(model *pet.Model, quitting func() bool, visible bool) *petWind
 		e.PreventDefault()
 		p.Hide()
 	})
-	// DragWindow's double click asks macOS to zoom the window, even though a
-	// pet has no meaningful maximized state. Undo it at once.
-	p.win.OnMaximize(func() { p.win.Unmaximize() })
+	// A fixed-size macOS panel can report isZoomed even at its normal
+	// size. Unmaximize would call zoom: and shift it, so recover geometry
+	// directly instead of trusting that flag.
+	p.win.OnMaximize(p.recover)
 	// Native DragWindow crosses displays without fighting the window server,
 	// but it lets the pet hang past an outer edge. Correct that after the
 	// mouse is released instead of calling SetPosition during the drag: a
@@ -304,14 +305,11 @@ func (p *petWindow) clampOutside() {
 	}
 }
 
-// recover also undoes an accidental zoom and restores the fixed size. It is
-// only for startup and display changes, not for every drag event.
+// recover restores the fixed size and reachable placement. It is only for
+// startup, display changes and unexpected zooms, not for every drag event.
 func (p *petWindow) recover() {
 	if p == nil || p.win == nil || p.win.IsDestroyed() {
 		return
-	}
-	if p.win.IsMaximized() {
-		p.win.Unmaximize()
 	}
 	width, height := p.windowSize()
 	if w, h := p.win.Size(); w != width || h != height {
