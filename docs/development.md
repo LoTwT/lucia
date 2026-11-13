@@ -1,13 +1,13 @@
 # 开发指南
 
-更新日期：2026-10-25。本文维护环境要求、本地启动、测试与日志排查；架构见 [architecture.md](architecture.md)，发布见 [release.md](release.md)。
+更新日期：2026-11-13。本文维护环境要求、本地启动、测试与日志排查；架构见 [architecture.md](architecture.md)，发布见 [release.md](release.md)。
 
 ## 环境要求
 
 | 工具 | 要求与用途 |
 |---|---|
-| Go | 1.27.2（`go.mod` 固定 `go 1.27.2`）。 |
-| MyGo | v0.5.5，作为 Go tool 固定在 `go.mod`（`tool github.com/egoist/mygo/cmd/mygo`），经 `go tool mygo` 使用，不依赖全局 `mygo`。 |
+| Go | 1.27.3（`go.mod` 固定 `go 1.27.3`）。 |
+| MyGo | v0.9.0，作为 Go tool 固定在 `go.mod`（`tool github.com/egoist/mygo/cmd/mygo`），经 `go tool mygo` 使用，不依赖全局 `mygo`。 |
 | Xcode 命令行工具 | macOS 打包与 DMG 所需。 |
 | NSIS | 仅在需要本地生成 Windows 安装包时要求；在 Windows 上构建时 MyGo 会自行下载，macOS 交叉构建缺少 `makensis` 时只警告并跳过安装包。 |
 

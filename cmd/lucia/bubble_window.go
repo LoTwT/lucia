@@ -97,8 +97,8 @@ func (b *bubbleWindow) Show(text string, petRect pet.Rect, displays []pet.Displa
 	if b == nil || b.win == nil || b.win.IsDestroyed() {
 		return
 	}
-	// MyGo v0.5.5 has no Linux implementation of SetIgnoreMouseEvents.
-	// Keep the bubble hidden there rather than letting it block clicks.
+	// Linux bubble click-through has not been validated for Lucia, even
+	// though MyGo now implements it. Keep it outside the release matrix.
 	if runtime.GOOS == "linux" {
 		return
 	}

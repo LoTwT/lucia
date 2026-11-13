@@ -208,7 +208,7 @@ jobs:
         run: |
           set -u
           exe="build/windows-amd64/Lucia.exe"
-          installer=$(find build/windows-amd64 -maxdepth 1 -name '*Setup*.exe' -print -quit)
+          installer="build/windows-amd64/lucia-setup-${RELEASE_VERSION}-amd64.exe"
           archive="build/windows-amd64/lucia-${RELEASE_VERSION}-windows-amd64.tar.gz"
           manifest="build/windows-amd64/update-windows-amd64.json"
           fail=0
@@ -216,8 +216,8 @@ jobs:
             echo "ERROR: missing executable: $exe"
             fail=1
           fi
-          if [ -z "$installer" ]; then
-            echo "ERROR: no NSIS installer under build/windows-amd64"
+          if [ ! -f "$installer" ]; then
+            echo "ERROR: missing NSIS installer: $installer"
             fail=1
           fi
           if [ ! -f "build/windows-amd64/THIRD-PARTY-NOTICES.md" ]; then
@@ -278,10 +278,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/manifests"
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
             --pattern 'update-*.json' --dir "$RUNNER_TEMP/manifests"
-          # GitHub stores spaces in asset names as dots.
           expected=(
-            "Lucia.${version}.arm64.dmg"
-            "Lucia.Setup.${version}.amd64.exe"
+            "lucia-${version}-arm64.dmg"
+            "lucia-setup-${version}-amd64.exe"
             "lucia-${version}-darwin-arm64.tar.gz"
             "lucia-${version}-windows-amd64.tar.gz"
             "update-darwin-arm64.json"
