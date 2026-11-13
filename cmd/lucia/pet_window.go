@@ -1,6 +1,8 @@
 package main
 
 import (
+	"image"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +26,8 @@ type petWindow struct {
 	onFirstFrame func()
 	firstFrame   atomic.Bool
 	dragWatching atomic.Bool
+	inputRegion  []image.Rectangle
+	regionSet    bool
 }
 
 // windowSize reads the current edge lengths from the atomic fields: drag
@@ -63,6 +67,7 @@ func newPetWindow(model *pet.Model, quitting func() bool, visible bool) *petWind
 		StateKey: "pet",
 		Content: mgui.View(func(c *mgui.Context) {
 			p.model.View(c)
+			p.updateInputRegion()
 			if p.onFirstFrame != nil && p.firstFrame.CompareAndSwap(false, true) {
 				p.onFirstFrame()
 			}
@@ -71,6 +76,16 @@ func newPetWindow(model *pet.Model, quitting func() bool, visible bool) *petWind
 	// A click or drag can change the pet while it is resting between
 	// scheduled frames; ask for that frame explicitly.
 	model.SetInvalidator(p.win.Invalidate)
+	p.win.OnShow(func() {
+		p.updateInputRegion()
+		p.win.Invalidate()
+	})
+	p.win.OnHide(func() {
+		// MyGo's macOS pointer monitor exists while any region is set,
+		// including hidden windows. Remove it while the pet is hidden.
+		p.win.SetInputRegion(nil)
+		p.regionSet = false
+	})
 	// Closing the pet hides it; only the tray's quit closes the app.
 	p.win.OnClose(func(e *mygo.CloseEvent) {
 		if quitting() {
@@ -136,6 +151,24 @@ func newPetWindow(model *pet.Model, quitting func() bool, visible bool) *petWind
 	p.recover()
 	mygo.Screen.OnDisplaysChanged(p.recover)
 	return p
+}
+
+func (p *petWindow) updateInputRegion() {
+	if p.win == nil || p.win.IsDestroyed() || !p.win.IsVisible() {
+		return
+	}
+	region := p.model.InputRegion()
+	if p.regionSet && slices.Equal(p.inputRegion, region) {
+		return
+	}
+	// Keep an empty non-nil slice: nil would restore the whole rectangle.
+	rects := make([]mygo.Rectangle, len(region))
+	for i, r := range region {
+		rects[i] = mygo.Rectangle{X: r.Min.X, Y: r.Min.Y, Width: r.Dx(), Height: r.Dy()}
+	}
+	p.win.SetInputRegion(rects)
+	p.inputRegion = append(p.inputRegion[:0], region...)
+	p.regionSet = true
 }
 
 // SetModel swaps the artwork and interaction map while keeping the window's

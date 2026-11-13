@@ -14,7 +14,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 | `internal/diagnostics` | 文件优先、stderr 镜像的诊断日志与大小轮转。 |
 | `internal/settings` | `settings.json` 的默认值、容错读取与原子写入。 |
 | `internal/updates` | 更新状态机；`MyGo` 适配器把 `mygo.Updater` 接到 `Source` 接口。 |
-| `internal/pet` | 桌宠模型、动画播放状态机、布局、交互、气泡模型与位置规则。 |
+| `internal/pet` | 桌宠模型、动画播放状态机、布局、alpha 输入区域、交互、气泡模型与位置规则。 |
 | `internal/petpack` | 素材包合同：WebP/ANMF 解码、单一 schema、source 生成器、校验、Store、lockfile、pending 恢复、zip 安装与裁剪校验。 |
 | `internal/builtinpack` | 内嵌鲸鱼包、4 帧 WebP、源 PNG、生成脚本与授权说明。 |
 | `internal/brand` | 应用品牌资源，包括托盘图标及其授权说明。 |
