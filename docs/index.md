@@ -9,6 +9,7 @@
 | [specs/pet-pack-source.md](specs/pet-pack-source.md) | 素材作者的 `pack.source.json` 契约、WebP 源目录、`petpack build`/`preview`、生成规则与第一版边界。 |
 | [upstream-mygo.md](upstream-mygo.md) | 记录适合由 MyGo 上游解决的问题；仅记录，贡献前必须由项目所有者确认。 |
 | [development.md](development.md) | 准备环境、本地启动、运行测试、排查日志与使用开发开关。 |
+| [testing-mygo-0.9.md](testing-mygo-0.9.md) | 查阅 MyGo v0.9.0 升级后的 macOS 实机验收、性能原始采样、未通过项目与未覆盖范围。 |
 | [release.md](release.md) | 版本与渠道规则、更新密钥、打标签发布、发布后验证。 |
 | [testing-updates.md](testing-updates.md) | 用 `test-v` 测试渠道演练 `0.0.1-rc.1` → `0.0.1-rc.2` 升级链路时，双方需要准备的内容与操作步骤。 |
 | [../README.md](../README.md) | 项目简介与最短上手命令。 |

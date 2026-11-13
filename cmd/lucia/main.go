@@ -135,6 +135,7 @@ func main() {
 		lastBubble time.Time
 		lastPhase  updates.Phase
 	)
+	configureWindowStateStore(paths.Data, func() *petWindow { return petWin })
 	petSound := newPetSound()
 	var commitPetPack func(string, *pet.Model) error
 	renderPackPreview := func(id string) ([]byte, error) {
