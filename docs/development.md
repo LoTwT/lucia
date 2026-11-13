@@ -71,7 +71,7 @@ lucia: self-test: version=0.0.1 commit=0123456789ab platform=darwin/arm64 update
 - `internal/petpack`：动画 WebP 的 ANMF 解析、部分帧、blend/dispose、裁剪缩放、单一 schema 严格校验、热区/交互/菜单/状态/事件/气泡、海报帧、zip 安装与 manifest 合并、Store/lockfile/pending 恢复、Unicode Path/GBK 文件名与 clip ID 归一化，以及 `pack.source.json` 生成器与确定性 zip 构建。
 - `internal/ui`：桌宠设置、应用/气泡主题映射与提示、分组设置卡片、侧栏页面切换、关于页版本/更新/数据信息、可用更新显示说明与安装按钮、禁用构建的解释。
 
-视图测试不打开窗口，但会执行真实布局与点击；`ui.NewTester` 对重复 key 与生命周期错误是严格的。位置约束和气泡定位是纯几何测试；桌宠的透明、置顶、拖动、跨屏、气泡穿透与托盘必须另做真机验收，测试器不能代替窗口行为。
+视图测试不打开窗口，但会执行真实布局与点击；`ui.NewTester` 对重复 key 与生命周期错误是严格的。位置约束和气泡定位是纯几何测试；桌宠的透明、置顶、拖动、跨屏、气泡穿透与托盘必须另做真机验收，测试器不能代替窗口行为。透明输入区域还覆盖 alpha 空洞、缩放与位移、复用解码缓冲区、全透明帧和矩形数量上限；跨应用实测方法与结果见[点击穿透验收](testing-input-region.md)。
 
 ## 数据与日志
 

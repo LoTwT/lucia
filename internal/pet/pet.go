@@ -90,6 +90,7 @@ type Model struct {
 	onInvalidate      func()
 	menuActions       MenuActions
 	animated          *animatedModel
+	inputRegion       inputRegionCache
 }
 
 // Hotzone is one clickable region in window-local DIPs.
@@ -263,8 +264,8 @@ func (m *Model) activity(now time.Time) Activity {
 	return activityAt(now.Sub(m.lastInteraction))
 }
 
-// View draws the pet on a transparent root. Hotzones are click targets and
-// the rest of the window is a DragWindow handle.
+// View draws the pet on a transparent root. The host applies InputRegion so
+// only visible artwork takes input; its non-hotzone pixels drag the window.
 func (m *Model) View(c *ui.Context) {
 	now := c.Now()
 	if m.start.IsZero() {
@@ -288,6 +289,12 @@ func (m *Model) View(c *ui.Context) {
 	bob, interactionLift := animatedMotion(reduceMotion, elapsed,
 		m.animated.pack.Manifest.IdleMotion, m.interactionMotion, m.interactionAt, now)
 	m.animated.sync(now, activity, idle, m.dragging, reduceMotion)
+	img := m.animated.imageFor(now, activity, m.dragging, m.interactionID, m.interactionAt, reduceMotion)
+	frame := -1
+	if !reduceMotion && m.animated.current != nil {
+		frame = m.animated.current.frame
+	}
+	m.updateInputRegion(img, frame, bob+interactionLift)
 
 	c.Root().Background(ui.Transparent)
 
@@ -336,9 +343,7 @@ func (m *Model) View(c *ui.Context) {
 	})
 	outer.Children(func() {
 		ui.Row(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-			image := ui.Image(c, m.animated.bitmapFor(
-				m.animated.imageFor(now, activity, m.dragging, m.interactionID, m.interactionAt, reduceMotion),
-			)).
+			image := ui.Image(c, m.animated.bitmapFor(img)).
 				Size(float32(m.spriteWidth), float32(m.spriteHeight)).
 				Fit(ui.Contain).
 				Label("Lucia 桌宠")
@@ -350,6 +355,7 @@ func (m *Model) View(c *ui.Context) {
 				ui.Box(c).Absolute().
 					Left(zone.Rect.X).Top(zone.Rect.Y).
 					Size(zone.Rect.W, zone.Rect.H).
+					Translate(0, bob+interactionLift).
 					Label(zone.Label).
 					Cursor(ui.CursorPointer).
 					OnClick(func() { m.TriggerHotzone(zone.ID) })

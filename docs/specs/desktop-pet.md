@@ -1,6 +1,6 @@
 # 桌宠规格（声明式素材包）
 
-更新日期：2026-11-13。本文维护桌宠窗口、常驻生命周期、idle 行为、交互、气泡与素材包合同的单一事实来源；模块关系见 [architecture.md](../architecture.md)，内置素材授权见 [NOTICE.md](../../internal/builtinpack/whale/NOTICE.md)。
+更新日期：2026-11-14。本文维护桌宠窗口、常驻生命周期、idle 行为、交互、气泡与素材包合同的单一事实来源；模块关系见 [architecture.md](../architecture.md)，内置素材授权见 [NOTICE.md](../../internal/builtinpack/whale/NOTICE.md)。
 
 ## 目标
 
@@ -21,9 +21,18 @@
 | 固定形态 | `DisableResize`、`DisableMinimize`、`DisableMaximize`、`DisableFullScreen` 均为 `true` |
 | 位置 | `StateKey: "pet"`；首次出现在主屏工作区右下角，距边缘 24 DIP |
 
-视图根节点使用透明背景，立绘以 `ui.Image` 绘制。窗口本身是 `DragWindow` 手柄，拖动主体、衣领或窗口其他区域移动窗口；热区是独立的透明点击层。透明边距不额外扩大窗口。
+视图根节点使用透明背景，立绘以 `ui.Image` 绘制。窗口本身是 `DragWindow` 手柄，拖动可见立绘的非热区部分移动窗口；热区是独立的透明点击层，随立绘的呼吸和交互位移移动。透明边距不额外扩大窗口。
 
 当素材宽高比与 `base.sprite` 不同时，立绘按 `Contain` 居中留边；热区和气泡锚点跟随实际绘制区域，而不是外框。`Model` 的 `WindowSize()`、`SpriteSize()`、`ImageRect()`、`Hotzones()` 和 `BubbleRect()` 是窗口接线的唯一几何来源。窗口从 1.0× 切换尺寸档位或换素材包时保持底边中点不动。
+
+鼠标输入区域由 `Model.InputRegion()` 提供，窗口通过 MyGo `SetInputRegion` 应用：
+
+- 根据本次绘制帧的非零 alpha 生成矩形区域，包含半透明边缘；透明边距与内部空洞的点击、右键、移动和滚轮传给底层应用。热区矩形不会扩大原生输入区域。
+- 区域跟随 `Contain` 绘制范围、呼吸/轻弹位移、缩放和换包；Reduce Motion 使用当前静态海报的轮廓。普通素材以 1 DIP 网格近似，边界向外取整；超大或碎片过多的素材逐步加粗网格，使每边采样不超过 512 格、矩形不超过 4096 个，细小空隙可能被合并。
+- 只缓存当前帧的轮廓，不累积全部动画帧；流式解码同时核对帧序号，避免两张复用缓冲区造成旧轮廓。原生区域只在内容变化时提交。
+- 全透明帧提交非 nil 的空区域，整窗穿透。隐藏时撤下原生区域监听，显示后重新应用；气泡继续整窗穿透。MyGo 在按住鼠标期间保留开始时的接收状态，角色拖动与底层应用的拖动各自完成。
+
+macOS 接入验收见[透明区域点击穿透验收](../testing-input-region.md)；Windows 本阶段跳过真机验收，保留交叉编译验证。
 
 ## 窗口位置约束
 
@@ -193,7 +202,7 @@ go tool mygo vet .
 
 `internal/petpack` 覆盖：WebP ANMF 解析、部分帧、blend/dispose、VP8L 与 lossy ALPH、裁剪缩放、单一 schema 校验、严格解码、热区顺序与重复 id、交互/菜单/状态/事件/气泡校验、循环动作拒绝、Windows 保留名、内置 id 保留、manifest 海报、zip 导入与 manifest 合并、meta-only 显式生成、Store 安装/同名错误/替换/激活/删除、替换失败回滚、lockfile/pending/backup 恢复、损坏元数据隔离、预览 PNG、0x7075/GBK 文件名、clip ID 归一化。
 
-`internal/pet` 覆盖：素材包布局、缩放、热区、气泡锚点、透明视图、idle 循环、交互 steps、首步 delay、气泡与声音事件、动作停留时序、解码失败自愈、Reduce Motion 海报、idleMotion 帧时钟、菜单声明顺序。
+`internal/pet` 覆盖：素材包布局、缩放、热区、气泡锚点、透明视图、alpha 输入区域与空洞、复用帧缓冲区、区域数量上限、idle 循环、交互 steps、首步 delay、气泡与声音事件、动作停留时序、解码失败自愈、Reduce Motion 海报、idleMotion 帧时钟、菜单声明顺序。
 
 `internal/builtinpack` 覆盖：内置包加载、4 帧 idle 与源 PNG 逐字节一致、帧时长、poster 帧。`internal/brand` 覆盖托盘图标。`internal/settings`/`cmd/lucia` 覆盖 Store 并发/失败/字段保留与 fallback active 清理；`internal/ui` 覆盖素材包列表、无效包说明、同名确认、导入后启用、替换 active 失败回退与删除。
 
@@ -202,6 +211,7 @@ macOS 真机手工检查：
 - 内置鲸鱼仍为 248×248，拖动、眨眼、呼吸、垂直轻弹和气泡不回归。
 - 导入 naiwa 后窗口为 248×310，idle、拖动和特殊动作菜单可用；naiwa 源 zip 没有 manifest，当前导入不会生成点击热区。需要点脸/摸头时，用 `pack.source.json` 声明 canvas 热区后重新 `build`。
 - 切换四档尺寸时窗口、立绘、热区和气泡锚点同步缩放，底边中点不跳。
+- 透明边距与动画中的空洞可穿透到底层应用；可见角色的热区、拖动和右键菜单仍正常，全透明帧不挡鼠标。
 - Reduce Motion 下只显示静态海报，交互海报 1.2 秒，动作菜单入口消失。
 - 素材包删除或损坏后启动退回鲸鱼，控制台不再显示“使用中”。
 - 气泡靠近屏幕顶部翻到下方时，卡片仍与头部保持 12 DIP 间距。
