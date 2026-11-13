@@ -1,6 +1,8 @@
 # 升级链路测试指南（test-v 测试渠道）
 
-更新日期：2026-10-20。状态：macOS arm64 与 Windows amd64 均已完成 `0.0.1-rc.1` → `0.0.1-rc.2` 实机升级；正式 `v0.0.1` 尚未发布。本文只用于验证自动更新，不发布正式版本；发布规则见 [release.md](release.md)，构建与日志位置见 [development.md](development.md)。
+更新日期：2026-11-13。状态：macOS arm64 与 Windows amd64 均已完成 `0.0.1-rc.1` → `0.0.1-rc.2` 实机升级；正式 `v0.0.1` 尚未发布。本文只用于验证自动更新，不发布正式版本；发布规则见 [release.md](release.md)，构建与日志位置见 [development.md](development.md)。
+
+下述实测基于 MyGo v0.5.5，文中的 RC 资产名保留当时发布的命名。当前依赖已升级至 v0.9.0，历史结果不能代替新版框架的实机升级验收；当前渠道约束与产物命名见 [发布指南](release.md)。
 
 > macOS 实测约束：ad-hoc 签名的测试版请安装在 `~/Applications/Lucia.app`。安装在 `/Applications` 时，更新可以下载、验签并写入，但 macOS 27 的 App Management/LaunchServices 可能让重启后的进程卡在 dyld（进程存在、无窗口）。正式版在 Developer ID 签名并公证后再建议放入 `/Applications`。
 

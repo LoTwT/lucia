@@ -4,8 +4,8 @@ Lucia 是一个基于 [MyGo](https://mygo.egoist.dev/) 原生 UI 的桌面应用
 
 ## 要求
 
-- Go 1.27.2（`go.mod` 固定）。
-- MyGo v0.5.5，作为 Go tool 固定在 `go.mod`，通过 `go tool mygo` 使用。
+- Go 1.27.3（`go.mod` 固定）。
+- MyGo v0.9.0，作为 Go tool 固定在 `go.mod`，通过 `go tool mygo` 使用。
 - macOS 打包需要 Xcode 命令行工具；Windows 安装包由 MyGo 在 Windows 上构建时生成 NSIS。
 
 ## 本地开发
