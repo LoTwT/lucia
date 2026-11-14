@@ -13,10 +13,21 @@ import (
 	"time"
 )
 
+func newTestStore(t *testing.T, data, active string) *Store {
+	t.Helper()
+	store := NewStore(data, active)
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close pack store: %v", err)
+		}
+	})
+	return store
+}
+
 func TestStoreImportListActivateDelete(t *testing.T) {
 	data := t.TempDir()
 	zipPath := writeStoreZip(t, data, true)
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if err := store.Recover(); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +88,7 @@ func TestStoreDeleteKeepsTrashWhenCleanupFails(t *testing.T) {
 	}
 	data := t.TempDir()
 	zipPath := writeStoreZip(t, data, true)
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if _, err := store.Install(zipPath, false); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +146,7 @@ func TestStoreDeleteSucceedsWhenLockWriteFails(t *testing.T) {
 	}
 	data := t.TempDir()
 	zipPath := writeStoreZip(t, data, true)
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if _, err := store.Install(zipPath, false); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +179,7 @@ func TestStoreDeleteSucceedsWhenLockWriteFails(t *testing.T) {
 func TestStoreInstallConflictsOnlyWhenIdExists(t *testing.T) {
 	data := t.TempDir()
 	zipPath := writeStoreZip(t, data, true)
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if _, err := store.Install(zipPath, false); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +231,7 @@ func TestImportMetaOnlyKeepsInteractionsAndBuildsActions(t *testing.T) {
 
 func TestStoreReplaceFailureRestoresHealthyPack(t *testing.T) {
 	data := t.TempDir()
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if _, err := store.Install(writeStoreZip(t, data, true), false); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +264,7 @@ func TestStoreRecoverCorruptMetadata(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(data, PendingFile), []byte("{bad pending"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if err := store.Recover(); err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +279,7 @@ func TestStoreRecoverCorruptMetadata(t *testing.T) {
 }
 
 func TestStoreDeleteRejectsRecoveryArtifacts(t *testing.T) {
-	store := NewStore(t.TempDir(), "")
+	store := newTestStore(t, t.TempDir(), "")
 	for _, id := range []string{".backup", "tiny.backup", ".import-tiny"} {
 		if err := store.Delete(id); err == nil {
 			t.Errorf("Delete accepted recovery artifact %q", id)
@@ -278,7 +289,7 @@ func TestStoreDeleteRejectsRecoveryArtifacts(t *testing.T) {
 
 func TestStoreDeleteRejectsCaseVariantOfActive(t *testing.T) {
 	data := t.TempDir()
-	store := NewStore(data, "tiny")
+	store := newTestStore(t, data, "tiny")
 	if err := os.MkdirAll(filepath.Join(data, "packs", "Tiny"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +300,7 @@ func TestStoreDeleteRejectsCaseVariantOfActive(t *testing.T) {
 
 func TestStoreInstallWithoutManifestUsesFilenameAndDefaults(t *testing.T) {
 	data := t.TempDir()
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	summary, err := store.Install(writeStoreZip(t, data, false), false)
 	if err != nil {
 		t.Fatal(err)
@@ -316,7 +327,7 @@ func TestStoreListsBrokenAndMissingActive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "pack.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	store := NewStore(data, "missing")
+	store := newTestStore(t, data, "missing")
 	if err := store.Recover(); err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +355,7 @@ func TestStoreDeletesInvalidDirectorySafely(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if err := store.Delete("bad name"); err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +369,7 @@ func TestStoreDeletesInvalidDirectorySafely(t *testing.T) {
 
 func TestStorePreviewPNG(t *testing.T) {
 	data := t.TempDir()
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if _, err := store.Install(writeStoreZip(t, data, true), false); err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +384,7 @@ func TestStorePreviewPNG(t *testing.T) {
 
 func TestStoreRecoverPendingRestoresBackup(t *testing.T) {
 	data := t.TempDir()
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if _, err := store.Install(writeStoreZip(t, data, true), false); err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +419,7 @@ func TestStoreRecoverPendingRestoresBackup(t *testing.T) {
 
 func TestStoreRecoverRestoresBackupOverBrokenFinal(t *testing.T) {
 	data := t.TempDir()
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if _, err := store.Install(writeStoreZip(t, data, true), false); err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +452,7 @@ func TestStoreRecoverRemovesInterruptedDirectories(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	store := NewStore(data, "")
+	store := newTestStore(t, data, "")
 	if err := store.Recover(); err != nil {
 		t.Fatal(err)
 	}

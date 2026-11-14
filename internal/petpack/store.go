@@ -97,17 +97,20 @@ type pendingFile struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// Store owns pack installation and the lockfile. All mutating operations are
-// serialized; the player only sees complete directories because ImportZip
-// installs through a temporary directory and rename.
+// Store owns pack installation and metadata. Its first operation reserves the
+// directory until Close; all mutating operations are also serialized within
+// this process. Imports install through a temporary directory and rename.
 type Store struct {
-	mu      sync.Mutex
-	dataDir string
-	active  string
+	mu        sync.Mutex
+	dataDir   string
+	active    string
+	ownership *directoryLock
+	closed    bool
 }
 
 // NewStore returns a store rooted at dataDir. The active id is normally
-// settings.PetPack; callers should call Recover before loading the player.
+// settings.PetPack; callers should call Recover before loading the player and
+// Close when finished. Acquire before reading settings for a long-lived Store.
 func NewStore(dataDir, active string) *Store {
 	if IsReservedPackID(active) {
 		active = ""
@@ -136,6 +139,9 @@ func (s *Store) SetActive(id string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.acquireLocked(); err != nil {
+		return err
+	}
 	lock, err := s.loadLocked()
 	if err != nil {
 		return err
@@ -153,6 +159,9 @@ func (s *Store) SetActive(id string) error {
 func (s *Store) Recover() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.acquireLocked(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(s.PacksDir(), 0o755); err != nil {
 		return err
 	}
@@ -204,6 +213,9 @@ func (s *Store) Recover() error {
 func (s *Store) List() ([]Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.acquireLocked(); err != nil {
+		return nil, err
+	}
 	lock, err := s.loadLocked()
 	if err != nil {
 		return nil, err
@@ -329,89 +341,109 @@ func containsSummary(summaries []Summary, id string) bool {
 // Install validates a zip, installs it below packs/<id>, and records it in
 // the lockfile. It never activates the pack; the console asks the
 // application to activate it after the install succeeds. A same-id pack
-// returns *PackExistsError before anything is written unless replace is true.
+// returns *PackExistsError before pack or metadata changes unless replace is
+// true; directory ownership may create its persistent lock file.
 func (s *Store) Install(zipPath string, replace bool) (Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := os.MkdirAll(s.PacksDir(), 0o755); err != nil {
-		return Summary{}, err
-	}
-	manifest, hasManifest, err := ReadZipManifest(zipPath)
+	pack, installedAt, err := s.importLocked(zipPath, ImportOptions{Force: replace})
 	if err != nil {
 		return Summary{}, err
 	}
-	id := manifest.ID
+	summary := summaryFromManifest(pack.Manifest, pack.Manifest.ID == s.active)
+	summary.InstalledAt = installedAt
+	return summary, nil
+}
+
+// Import installs with CLI metadata overrides while retaining the validated
+// Pack. It shares Install's pending record, rollback and metadata transaction.
+// OnStage runs under the Store mutex and must not call Store methods.
+func (s *Store) Import(zipPath string, opts ImportOptions) (*Pack, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pack, _, err := s.importLocked(zipPath, opts)
+	return pack, err
+}
+
+func (s *Store) importLocked(zipPath string, opts ImportOptions) (*Pack, time.Time, error) {
+	if err := s.acquireLocked(); err != nil {
+		return nil, time.Time{}, err
+	}
+	if err := os.MkdirAll(s.PacksDir(), 0o755); err != nil {
+		return nil, time.Time{}, err
+	}
+	manifest, hasManifest, err := ReadZipManifest(zipPath)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	id := opts.ID
+	if id == "" {
+		id = manifest.ID
+	}
 	if id == "" {
 		id = idFromZipName(zipPath)
 	}
 	if !validPackDirID(id) {
-		return Summary{}, fmt.Errorf("无法从压缩包确定合法的素材包 id（%q）", id)
+		return nil, time.Time{}, fmt.Errorf("无法从压缩包确定合法的素材包 id（%q）", id)
 	}
 	if IsReservedPackID(id) {
-		return Summary{}, fmt.Errorf("素材包 id %q 保留给内置素材包", id)
+		return nil, time.Time{}, fmt.Errorf("素材包 id %q 保留给内置素材包", id)
 	}
-	final := filepath.Join(s.PacksDir(), id)
-	if _, err := os.Stat(final); err == nil {
-		if !replace {
-			name := manifest.Name
+	if _, err := os.Stat(filepath.Join(s.PacksDir(), id)); err == nil {
+		if !opts.Force {
+			name := opts.Name
+			if name == "" {
+				name = manifest.Name
+			}
 			if name == "" {
 				name = id
 			}
-			return Summary{}, &PackExistsError{ID: id, Name: name}
+			return nil, time.Time{}, &PackExistsError{ID: id, Name: name}
 		}
 	} else if !os.IsNotExist(err) {
-		return Summary{}, err
+		return nil, time.Time{}, err
 	}
 
 	pending := pendingFile{
 		Operation: "import", ID: id, Stage: "reading", UpdatedAt: time.Now().UTC(),
 	}
 	if err := s.writePendingLocked(pending); err != nil {
-		return Summary{}, err
+		return nil, time.Time{}, err
 	}
-	opts := ImportOptions{
-		ID:    id,
-		Force: replace,
-		OnStage: func(stage string) {
-			pending.Stage = stage
-			pending.UpdatedAt = time.Now().UTC()
-			_ = s.writePendingLocked(pending)
-		},
+	onStage := opts.OnStage
+	opts.ID = id
+	opts.OnStage = func(stage string) {
+		pending.Stage = stage
+		pending.UpdatedAt = time.Now().UTC()
+		_ = s.writePendingLocked(pending)
+		if onStage != nil {
+			onStage(stage)
+		}
 	}
-	if !hasManifest {
+	if !hasManifest && opts.Base.Window.Width == 0 {
 		opts.Base = Base{
 			Window: Size{Width: 248, Height: 310},
 			Sprite: Size{Width: 240, Height: 300},
 			Margin: 4,
 		}
-		opts.BubbleAnchor = Anchor{X: 0.5, Y: 0.05}
 	}
-	_, importErr := ImportZip(zipPath, s.PacksDir(), opts)
+	pack, importErr := importZip(zipPath, s.PacksDir(), opts)
 	if importErr != nil {
 		pending.Error = importErr.Error()
 		pending.UpdatedAt = time.Now().UTC()
 		_ = s.writePendingLocked(pending)
-		return Summary{}, importErr
+		return nil, time.Time{}, importErr
 	}
 	_ = os.Remove(s.pendingPath())
 	lock, err := s.loadLocked()
 	if err != nil {
-		return Summary{}, err
+		return nil, time.Time{}, err
 	}
 	lock.Active = s.active
 	if err := s.refreshLockLocked(lock); err != nil {
-		return Summary{}, err
+		return nil, time.Time{}, err
 	}
-	manifest, err = ReadManifest(final, id)
-	if err != nil {
-		return Summary{}, err
-	}
-	summary := summaryFromManifest(manifest, id == s.active)
-	summary.ID = id
-	if entry, ok := lock.Packs[id]; ok {
-		summary.InstalledAt = entry.InstalledAt
-	}
-	return summary, nil
+	return pack, lock.Packs[id].InstalledAt, nil
 }
 
 // Delete removes a pack directory. The active pack cannot be deleted because
@@ -419,6 +451,9 @@ func (s *Store) Install(zipPath string, replace bool) (Summary, error) {
 func (s *Store) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.acquireLocked(); err != nil {
+		return err
+	}
 	if strings.EqualFold(id, s.active) {
 		return errors.New("正在使用的素材包不能删除")
 	}

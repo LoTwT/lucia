@@ -1,6 +1,6 @@
 # 架构
 
-更新日期：2026-10-25。本文维护 Lucia 的模块边界、启动顺序、共享目录与更新状态机；开发命令见 [development.md](development.md)，发布规则见 [release.md](release.md)。
+更新日期：2026-11-14。本文维护 Lucia 的模块边界、启动顺序、共享目录与更新状态机；开发命令见 [development.md](development.md)，发布规则见 [release.md](release.md)。
 
 ## 1. 总体结构
 
@@ -22,7 +22,7 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 | `resources/` | 应用图标与需要随包分发的资源；MyGo 在打包时合并到应用资源根。 |
 | `cmd/petpack/` | 开发用导入、`-check`、`build` 与 `preview` 工具；不随桌面应用分发。 |
 
-依赖方向：`cmd` → `internal/*`；`internal/ui` 只依赖 `internal/settings` 与 `internal/updates`，素材包页面使用自己的 `PackSummary` 视图模型，不导入 `internal/petpack`；`internal/pet` 依赖 MyGo 的 `ui`、标准库与 `internal/petpack`；`internal/petpack` 只依赖标准库、`golang.org/x/image` 与 `golang.org/x/text`，不反向依赖 `internal/pet` 或 `internal/ui`。这样 WebP/ANMF 解码、导入事务和桌宠状态机可以独立测试，窗口接线保持在上层。`internal/updates` 是唯一直接调用 `mygo.Updater` 的包。
+依赖方向：`cmd` → `internal/*`；`internal/ui` 只依赖 `internal/settings` 与 `internal/updates`，素材包页面使用自己的 `PackSummary` 视图模型，不导入 `internal/petpack`；`internal/pet` 依赖 MyGo 的 `ui`、标准库与 `internal/petpack`；`internal/petpack` 只依赖标准库、`golang.org/x/image`、`golang.org/x/text` 与 `golang.org/x/sys`，不反向依赖 `internal/pet` 或 `internal/ui`。这样 WebP/ANMF 解码、导入事务和桌宠状态机可以独立测试，窗口接线保持在上层。`internal/updates` 是唯一直接调用 `mygo.Updater` 的包。
 
 ## 2. 启动顺序
 
@@ -33,8 +33,8 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 3. 调用 `mygo.App.SetPath` 覆盖 `PathUserData`、`PathCache`、`PathLogs`，让框架自己的状态（窗口位置、更新状态）与应用文件落在同一根目录。覆盖必须在 `Run` 前完成。
 4. `RequestSingleInstanceLock`；第二个实例把命令行交给第一个实例后直接退出，不接触日志与数据文件。
 5. 打开诊断日志，写入首行 `version=… commit=… platform=… data=… logs=…`。打不开日志不阻止启动。
-6. 读取设置，应用保存的应用主题（`mygo.Theme.SetSource`），并构造进程内唯一的 `settings.Store`。文件缺失用默认值；文件损坏时先改名为 `settings.json.bad` 并记录原因，再继续用默认值；改名失败时本次运行拒绝写入设置，避免覆盖唯一副本。
-7. 构造 `petpack.Store`，先执行 `Recover` 清理中断的导入、恢复 `.backup`、重建 lockfile，再把 `petPack` 写入 active；构造更新管理器，把 `CheckUpdatesOnLaunch` 同步到管理器的自动检查开关；加载内嵌鲸鱼包，再构造桌宠模型：`petPack` 非空时从 `<数据目录>/packs/<id>` 加载外部包，失败则记录日志、退回内嵌包并清除 active 选择，避免控制台状态与桌面不一致。动画包在后台解码 idle 缓存，首帧海报立即可见。
+6. 构造 `petpack.Store` 并获取目录持有权，失败时只显示启动错误窗口；成功后再读取设置、应用保存的主题（`mygo.Theme.SetSource`），并构造进程内唯一的 `settings.Store`。文件缺失用默认值；文件损坏时先改名为 `settings.json.bad` 并记录原因，再继续用默认值；改名失败时本次运行拒绝写入设置，避免覆盖唯一副本。
+7. 执行 `Recover` 清理中断的导入、恢复 `.backup`、重建 lockfile，再把 `petPack` 写入 active；构造更新管理器，把 `CheckUpdatesOnLaunch` 同步到管理器的自动检查开关；加载内嵌鲸鱼包，再构造桌宠模型：`petPack` 非空时从 `<数据目录>/packs/<id>` 加载外部包，失败则记录日志、退回内嵌包并清除 active 选择，避免控制台状态与桌面不一致。动画包在后台解码 idle 缓存，首帧海报立即可见。
 8. 注册单实例、激活、`lucia://` 深链接、退出前与最后窗口关闭回调；设置应用菜单。
 9. `WhenReady` 中创建桌宠窗口、默认隐藏的气泡窗口与默认隐藏的控制台窗口，创建托盘，接上管理器的重绘与安装完成回调，再启动自动检查循环。
 10. `App.Run`。退出后记录 `exited`。
@@ -59,10 +59,10 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 - manifest：`internal/petpack.Manifest` 维护画布、裁剪、窗口/立绘 DIP 尺寸、气泡锚点、clip 列表、动作链、状态、事件、热区、交互、气泡与菜单。只有一个 `schema: 1`，严格解码，无版本分支或旧格式升级。
 - 生成器：`pack.source.json` 是作者侧独立严格契约；`petpack build` 扫描 WebP、计算或固定 crop、生成 actions/states/events/menu、把 canvas 热区转换到 crop 坐标，并产出确定性 zip。build 不安装、不激活；zip 内嵌 source，安装仍走现有导入器。
 - 交互：`hotzones` 是有序数组，`rect` 归一化到裁剪后的立绘，后声明者优先命中。每个热区引用一个 `interaction`；交互包含可选 steps、气泡键、声音、motion 与 `reducedPoster`。`menu` 每项引用 interaction 或有限 action。
-- 安装事务：`petpack.Store` 串行化安装/删除/激活，`packs.lock.json` 缓存已安装元数据，`packs.pending.json` 记录安装阶段。启动时 `Recover` 清理 `.import-*`/`.trash-*`、恢复 `.backup`、删除已完成的 pending，并从磁盘重建 lockfile。正在使用的包不能删除；内置包只读。
+- 安装事务：`petpack.Store` 串行化安装/删除/激活，`packs.lock.json` 缓存已安装元数据，`packs.pending.json` 记录安装阶段；`packs/.write.lock` 用于跨进程持有权，行为由[桌宠规格](specs/desktop-pet.md#导入与控制台)维护。启动时 `Recover` 清理 `.import-*`/`.trash-*`、恢复 `.backup`、删除已完成的 pending，并从磁盘重建 lockfile。正在使用的包不能删除；内置包只读。
 - 解码：`internal/petpack` 解析 WebP RIFF/ANMF，使用 `golang.org/x/image/webp` decode 单帧，再按 blend/dispose 顺序合成；不引入 cgo。每帧保留自身时长，支持特殊动作的长停顿帧。
 - 播放：`internal/pet` 的动画状态机按 UI 时钟推进 `enter → loop → exit`；idle 预解码缓存，其他 clip 在 UI 线程顺序解码。缓存为后台工作，不驱动 UI。Reduce Motion 使用 `reducedPoster`。
-- 安装：控制台和 `cmd/petpack` 共用导入器。读取 zip 中任意层级最浅的 `pack.json`/`pack.meta.json`（4 MiB 上限），优先使用带 CRC32 校验的 0x7075 Unicode Path，回退 GBK；只接受 `.webp`，跳过 `__MACOSX/` 与 `._*` 资源叉，限制单文件 64 MiB、总量 512 MiB，写临时目录后备份旧包、安装并校验，失败回滚。`Store.Install(zip, replace)` 仅在同名且未请求替换时返回 `PackExistsError`，此时没有写入；控制台据此弹出确认。授权不再作为导入门槛。
+- 安装：控制台和 `cmd/petpack` 共用导入器。读取 zip 中任意层级最浅的 `pack.json`/`pack.meta.json`（4 MiB 上限），优先使用带 CRC32 校验的 0x7075 Unicode Path，回退 GBK；只接受 `.webp`，跳过 `__MACOSX/` 与 `._*` 资源叉，限制单文件 64 MiB、总量 512 MiB，写临时目录后备份旧包、安装并校验，失败回滚。`Store.Install(zip, replace)` 仅在同名且未请求替换时返回 `PackExistsError`，此时不改动素材或安装记录；控制台据此弹出确认。授权不再作为导入门槛。
 - 控制台：素材包页列出内嵌包与有效/无效的用户包、clip/帧/热区/交互数量与授权状态，生成海报预览、叠加热区，并列出交互步骤与动作停留时序；内嵌包只读。导入、启用与预览的昂贵部分（读取并校验全部 clip、构建动画模型、生成海报 PNG）都在后台执行，再经 `Window.Update` 回到 UI 线程：启用依次写 `SetActive`、设置与模型，失败则保留旧模型和旧设置；替换正在使用的包后若启用失败，会切回内置包。预览用请求序号丢弃过期结果，PNG 解码仍在 UI 线程执行；启用期间控制台按钮禁用，窗口销毁时放弃回调。运行中的应用与 `cmd/petpack` 不能并发导入（只有进程内互斥）。
 - 回退：manifest/解码/海报任一失败都记录日志并使用内嵌包，并清除失效的 active 选择；可选素材不能阻止应用启动。
 - 分发：naiwa 等外部素材不进入 Git、CI、DMG/NSIS 或发布资产；授权由用户本地确认。
@@ -110,5 +110,5 @@ Lucia 是单个 Go 模块的 MyGo 原生 UI 应用，不使用 Web 前端、WebV
 
 - 不包含 Web 前端、浏览器内 UI 或 TypeScript 绑定。
 - 当前包含托盘常驻，以及桌宠、气泡与控制台三个窗口；关窗只隐藏，退出由托盘或 Cmd+Q 发起。
-- 桌宠当前包含内嵌鲸鱼包的 idle 呼吸/眨眼、四档尺寸、非方形布局、拖动、声明式热区与交互、右键菜单、独立气泡，以及外部包的 idle/情绪/特殊动作/拖动动画、交互步骤和动作级停留时序；更新检查/下载、更新失败、首次启动、换包和重置位置通过 manifest 事件映射。控制台提供素材包导入、同名确认、校验预览、启用/切换/删除；内置包只读。暂不包含可视化拖拽编辑热区/交互、跨进程导入锁、`listen` 产品触发源、`speak` 与气泡时长联动、随机闲时动作、桌面走动、AI 对话和多只宠物。外部素材包是用户本地导入的可选能力，不是随包分发的默认皮肤。
+- 桌宠当前包含内嵌鲸鱼包的 idle 呼吸/眨眼、四档尺寸、非方形布局、拖动、声明式热区与交互、右键菜单、独立气泡，以及外部包的 idle/情绪/特殊动作/拖动动画、交互步骤和动作级停留时序；更新检查/下载、更新失败、首次启动、换包和重置位置通过 manifest 事件映射。控制台提供素材包导入、同名确认、校验预览、启用/切换/删除；内置包只读。暂不包含可视化拖拽编辑热区/交互、`listen` 产品触发源、`speak` 与气泡时长联动、随机闲时动作、桌面走动、AI 对话和多只宠物。外部素材包是用户本地导入的可选能力，不是随包分发的默认皮肤。
 - 不包含业务数据、账号体系或服务端。Lucia 当前是可运行、可发布的应用底座。

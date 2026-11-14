@@ -54,8 +54,20 @@ type ImportOptions struct {
 // actions, hotzones and interactions; a non-empty manifest crop is kept as
 // pinned geometry, otherwise crop is derived from alpha bounds after skipping
 // fully transparent clips. ClipEntry frame counts and hashes are rebuilt from
-// the extracted files.
+// the extracted files. It owns the destination directory until return and
+// returns ErrStoreBusy if a Store or another importer already owns it.
 func ImportZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
+	lock, err := acquireDirectoryLock(packsRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	return importZip(zipPath, packsRoot, opts)
+}
+
+// importZip requires directory ownership. Store retains that ownership across
+// recovery, installation, metadata and settings updates instead of reacquiring.
+func importZip(zipPath, packsRoot string, opts ImportOptions) (*Pack, error) {
 	stage := func(name string) {
 		if opts.OnStage != nil {
 			opts.OnStage(name)

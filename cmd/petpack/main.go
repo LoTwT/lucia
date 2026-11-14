@@ -64,6 +64,10 @@ func main() {
 		log.Fatal(err)
 	}
 	store := petpack.NewStore(data, "")
+	if err := store.Acquire(); err != nil {
+		log.Fatal(err)
+	}
+	defer store.Close()
 	if err := store.Recover(); err != nil {
 		log.Fatal(err)
 	}
@@ -84,7 +88,7 @@ func main() {
 		}
 		opts.BubbleAnchor = petpack.Anchor{X: 0.5, Y: 0.05}
 	}
-	pack, err := petpack.ImportZip(*zipPath, filepath.Join(data, "packs"), opts)
+	pack, err := store.Import(*zipPath, opts)
 	if err != nil {
 		log.Fatal(err)
 	}

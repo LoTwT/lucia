@@ -150,10 +150,13 @@ macOS 接入验收见[透明区域点击穿透验收](../testing-input-region.md
 
 - 控制台与 `cmd/petpack` 共用导入器。zip 中任意层级最浅的 `pack.json` 或 `pack.meta.json` 提供 id、名称、几何、动作、状态、事件、热区、交互和菜单；缺失时从 zip 文件名推导 id 并生成显式 actions/states/events/menu，不生成热区或交互。`states.idle` 缺失时只补缺失的 `idle/drag/drowsy/asleep` 字段，不覆盖作者已声明的状态。CLI 默认尊重 manifest 中的 id、名称和几何，显式 `-id`/`-name` 才覆盖。
 - 导入只接受 `.webp`，丢弃 MP4 预览；限制 manifest 4 MiB、单文件 64 MiB、解压总量 512 MiB，防止 zip-slip 与 zip 炸弹；先写临时目录，旧包备份后安装新包并校验，失败时回滚。
-- `Store.Install(zip, replace)` 在 id 已存在且 `replace=false` 时返回 `*PackExistsError`，此时磁盘没有任何写入。控制台收到后弹出原生替换确认，确认后再以 `replace=true` 重试；取消无副作用。
+- `Store.Install(zip, replace)` 在 id 已存在且 `replace=false` 时返回 `*PackExistsError`，不改动素材、pending 或元数据。控制台收到后弹出原生替换确认，确认后再以 `replace=true` 重试；取消不改动素材。
 - 导入不再要求授权勾选，`license` 仅展示。同名冲突才出现替换确认。
 - 导入成功后桌宠立即切换；失败时保留原模型。列表可启用、删除未使用的包并预览海报、热区、交互步骤和动作时序。正在使用的包不能删除。
-- 导入和替换在后台执行，完成后通过 UI 线程更新控制台并切换模型。启用同样先在后台加载素材包并构建模型，再回到 UI 线程写 active 与设置；预览的海报生成在后台，PNG 解码仍在 UI 线程，过期结果按请求序号丢弃。运行中的应用与开发工具不能同时导入（没有跨进程锁）。
+- 导入和替换在后台执行，完成后通过 UI 线程更新控制台并切换模型。启用同样先在后台加载素材包并构建模型，再回到 UI 线程写 active 与设置；预览的海报生成在后台，PNG 解码仍在 UI 线程，过期结果按请求序号丢弃。
+- 同一 `packs/` 目录只能由一个管理进程持有。应用在读取设置、恢复 pending 和加载播放器前调用 `Store.Acquire()`，在确认退出的 `App.OnQuit` 事件中释放，并保留 `defer Close()` 兜底；不能只等 `App.Run` 返回，因为 MyGo 会在返回前启动更新后的新进程。CLI 在恢复、导入和更新设置之前获取锁，命令结束后释放。占用时立即返回 `ErrStoreBusy`，不等待、不清理其他进程的临时目录，也不修改素材、pending、元数据或设置。CLI 打印可重试提示并以非零状态退出；应用显示原因与“退出”按钮。
+- `Store` 的安装、导入、删除、激活、恢复和列表刷新共享持有权；列表刷新也会重建元数据。未显式获取时，首次操作获取锁并持有到 `Close()`；关闭后不能再写入。CLI 的 `Store.Import` 保留 `-id`、`-name` 等覆盖参数，并复用安装事务。独立 `ImportZip` 只在本次导入期间持锁；源码 `build`、`preview` 和只读 `-check` 不占安装目录的写锁。
+- 锁使用 `packs/.write.lock` 上的系统文件锁，macOS/Linux 为非阻塞 `flock`，Windows 为 `LockFileEx`。它与记录安装元数据的 `packs.lock.json` 不同；锁文件可能在首次操作时创建，之后保留，不能按文件是否存在判断占用，也不应删除。正常关闭主动解锁，进程崩溃后由系统释放，重启后再执行原有 pending 恢复。系统行为参考 [Apple flock 手册](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html)和 [Microsoft LockFileEx 文档](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex)。
 - 开发命令：
   ```sh
   go run ./cmd/petpack -zip /path/to/pack.zip
@@ -180,12 +183,11 @@ macOS 接入验收见[透明区域点击穿透验收](../testing-input-region.md
 
 ## 非目标
 
-当前增量不包含：可视化拖拽编辑热区/交互、按 clip 单独配置热点、`listen` 的产品触发源、`speak` 与气泡时长联动、随机闲时动作开关、跨进程导入锁、Windows 真机验收。`edge_peek` 目前只作为手动特殊动作，不实现窗口越界探头。
+当前增量不包含：可视化拖拽编辑热区/交互、按 clip 单独配置热点、`listen` 的产品触发源、`speak` 与气泡时长联动、随机闲时动作开关、Windows 真机验收。`edge_peek` 目前只作为手动特殊动作，不实现窗口越界探头。
 
 ## 后续产品项
 
 - 可视化素材编辑器：在控制台里拖拽热区、编辑交互 steps 与 timing，并直接写回 `pack.json`。
-- 为 CLI 与控制台增加跨进程文件锁。
 - 自定义气泡样式、音效文件和更多 motion 枚举，需要先定义可验证的封闭集合。
 
 ## 验收

@@ -46,6 +46,7 @@ func TestClearFallbackActiveResetsModelAndSettings(t *testing.T) {
 	prefs.PetPack = "broken"
 	settingsStore := settings.NewStore(data, prefs)
 	packStore := petpack.NewStore(data, prefs.PetPack)
+	defer packStore.Close()
 	if err := packStore.SetActive(prefs.PetPack); err != nil {
 		t.Fatal(err)
 	}
