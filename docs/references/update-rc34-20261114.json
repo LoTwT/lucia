@@ -1,0 +1,236 @@
+{
+  "date": "2026-11-14",
+  "sourceCommit": "f2607268a00958874ee44fc341c93d6f80d78de3",
+  "framework": "github.com/egoist/mygo v0.9.0",
+  "environment": {
+    "os": "macOS 27.2 (26B123)",
+    "hardware": "Apple M1 Pro",
+    "architecture": "arm64",
+    "displayDIP": [
+      1512,
+      982
+    ],
+    "scale": 2,
+    "installation": "~/Applications/Lucia.app"
+  },
+  "channel": {
+    "tagPrefix": "test-v",
+    "workflowLatestArgument": false,
+    "observedLatestFallback": "test-v0.0.1-rc.4",
+    "stableReleasePublished": false,
+    "previousReleaseAssetsPreserved": true
+  },
+  "mainCI": [
+    {
+      "name": "Check (macos-latest)",
+      "conclusion": "success",
+      "head": "f2607268a00958874ee44fc341c93d6f80d78de3",
+      "url": "https://github.com/LoTwT/lucia/actions/runs/43548287674/job/132304605886"
+    },
+    {
+      "name": "Check (windows-latest)",
+      "conclusion": "success",
+      "head": "f2607268a00958874ee44fc341c93d6f80d78de3",
+      "url": "https://github.com/LoTwT/lucia/actions/runs/43548287674/job/132304605628"
+    }
+  ],
+  "releases": [
+    {
+      "version": "0.0.1-rc.3",
+      "tag": "test-v0.0.1-rc.3",
+      "source": "f2607268a00958874ee44fc341c93d6f80d78de3",
+      "release": "https://github.com/LoTwT/lucia/releases/tag/test-v0.0.1-rc.3",
+      "releaseId": 445058148,
+      "publishedAt": "2026-11-14T06:04:25Z",
+      "workflow": {
+        "id": 43564321887,
+        "tag": "test-v0.0.1-rc.3",
+        "head": "f2607268a00958874ee44fc341c93d6f80d78de3",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/LoTwT/lucia/actions/runs/43564321887"
+      },
+      "assetSha256": {
+        "install.ps1": "cf5455f3e9e7b7a14f4c2d810168c8186e4830786efad9ae7619d956a51130c3",
+        "install.sh": "488a500572015c8cbf1ccc187987338b4f70b5a56d59fe5e31987e8d7d65a685",
+        "lucia-0.0.1-rc.1-to-0.0.1-rc.3-darwin-arm64.delta": "009a0dca8d2ffe1747e7c21e893c94cfcbbbd18c0418d317a7da8635766f107a",
+        "lucia-0.0.1-rc.1-to-0.0.1-rc.3-windows-amd64.delta": "f5bea6ecdde71cf7643d2212e5f4017513f9a8d5eae84da164caeccaaa1ec2dd",
+        "lucia-0.0.1-rc.2-to-0.0.1-rc.3-darwin-arm64.delta": "ac163fc87bea82843d8f0fd2d57729d1cdcdb00447e863b66a30b18116436e5f",
+        "lucia-0.0.1-rc.2-to-0.0.1-rc.3-windows-amd64.delta": "3e5f3fdd837f642d46f491248d354a46f2d1bd14bf9ae72107c66f4ecb9724a3",
+        "lucia-0.0.1-rc.3-arm64.dmg": "119c3ab7eea9bd3a73d65f96d1d6e0e1b5c076a67a3b4fa7aba27ab63ea6bdd6",
+        "lucia-0.0.1-rc.3-darwin-arm64.tar.gz": "534a402bf4f8825574cfbbb48c07b5977391e3ab41285d49725499a902a632ad",
+        "lucia-0.0.1-rc.3-windows-amd64.tar.gz": "c2e0721929a9d5b1c00246e82bb2b4182321bfe44629afbc77266cc6c007ba63",
+        "lucia-setup-0.0.1-rc.3-amd64.exe": "62d8070bac6ccc84aed1c9fef01fb4f78c441834f02edf40656338317790f103",
+        "SHA256SUMS": "3cc290419c461978a2e4343d2f9142503bb5a380efbcad6f6ce3d65bb393113b",
+        "update-darwin-arm64.json": "8ed7b36a62aa8c4af57b2e8abc4d8b86579d9eb69d1931122ed345260bee2a4a",
+        "update-windows-amd64.json": "c90bb8863b233b59e717d3e928d615862c658ed427b856a24195e1caa8f0f9f3"
+      },
+      "archiveContents": {
+        "darwin-arm64": [
+          "Lucia.app",
+          "Lucia.app/Contents",
+          "Lucia.app/Contents/Info.plist",
+          "Lucia.app/Contents/MacOS",
+          "Lucia.app/Contents/MacOS/Lucia",
+          "Lucia.app/Contents/PkgInfo",
+          "Lucia.app/Contents/Resources",
+          "Lucia.app/Contents/Resources/AppIcon.icns",
+          "Lucia.app/Contents/Resources/THIRD-PARTY-NOTICES.md",
+          "Lucia.app/Contents/Resources/icon.png",
+          "Lucia.app/Contents/_CodeSignature",
+          "Lucia.app/Contents/_CodeSignature/CodeResources"
+        ],
+        "windows-amd64": [
+          ".mygo-files",
+          "Lucia.exe",
+          "THIRD-PARTY-NOTICES.md",
+          "icon.png"
+        ]
+      },
+      "verifiedSignedPayloads": 6,
+      "checksumManifestValid": true,
+      "manifestVersionsAndNotesValid": true,
+      "installerScriptsUseTestChannel": true
+    },
+    {
+      "version": "0.0.1-rc.4",
+      "tag": "test-v0.0.1-rc.4",
+      "source": "f2607268a00958874ee44fc341c93d6f80d78de3",
+      "release": "https://github.com/LoTwT/lucia/releases/tag/test-v0.0.1-rc.4",
+      "releaseId": 445061173,
+      "publishedAt": "2026-11-14T06:10:11Z",
+      "workflow": {
+        "id": 43564790363,
+        "tag": "test-v0.0.1-rc.4",
+        "head": "f2607268a00958874ee44fc341c93d6f80d78de3",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/LoTwT/lucia/actions/runs/43564790363"
+      },
+      "assetSha256": {
+        "install.ps1": "a188ea4ab7a4689a54ba863535d88edd11f065f5c2827068798b20e269ccb288",
+        "install.sh": "3f5ef9248fb285bf05c7ddd032412b8053c9f5e4bc7f32030a1156018151f663",
+        "lucia-0.0.1-rc.1-to-0.0.1-rc.4-darwin-arm64.delta": "d0e91044317af01c67b99d73f766e6e0ef3ea53aae4cd3efb6464905e939bc5e",
+        "lucia-0.0.1-rc.1-to-0.0.1-rc.4-windows-amd64.delta": "f4049f73bc2f0fa0a389f3c4f5f51e73bb25f3df3bec33816c25468327956c25",
+        "lucia-0.0.1-rc.2-to-0.0.1-rc.4-darwin-arm64.delta": "26ac5979624d61533271871b210abfe5d8d8350ca21b77bcb8a58335714030c0",
+        "lucia-0.0.1-rc.2-to-0.0.1-rc.4-windows-amd64.delta": "517885d8f1becd81e12ad562219c6e761070425a31cc50b62eae83a917bb2fb5",
+        "lucia-0.0.1-rc.3-to-0.0.1-rc.4-darwin-arm64.delta": "4e236c3a268319095182e2d3d3c27d73f6d7e57254ead1fe5ec13d40cc46f48e",
+        "lucia-0.0.1-rc.3-to-0.0.1-rc.4-windows-amd64.delta": "b86365c3aa895bc258385be942682b3bcb3c6e579b2580537b85cf9bb5984320",
+        "lucia-0.0.1-rc.4-arm64.dmg": "13d34b97dd1f8ab4259651961ebd03735fcd11bc8aa158749107ee28a40f77f3",
+        "lucia-0.0.1-rc.4-darwin-arm64.tar.gz": "af52d9b83c1e86652089997bef85e78426aeb54ac4239dd0be8a7adb561f03ea",
+        "lucia-0.0.1-rc.4-windows-amd64.tar.gz": "f70347507190c5893532edc6f2bb0de84a6ce9d09a63304c77c607b32b2f70a8",
+        "lucia-setup-0.0.1-rc.4-amd64.exe": "71434ca522ab11b620389043c5181809cf1017ca43fa4973b156d37fe533ad89",
+        "SHA256SUMS": "8ae67be6d09eefaf0b8ddbe4bfad9eaf4461678ef748b2301a02d0288edbd1eb",
+        "update-darwin-arm64.json": "8096690239d8d87bc200c9bb8ab7d163127b167aea82fbeab9c58073f4ea80e0",
+        "update-windows-amd64.json": "3fd7ed0bd03aa7ec2c491c093b1ff617db8f2a2d3bee1b0d191268dd527090f6"
+      },
+      "archiveContents": {
+        "darwin-arm64": [
+          "Lucia.app",
+          "Lucia.app/Contents",
+          "Lucia.app/Contents/Info.plist",
+          "Lucia.app/Contents/MacOS",
+          "Lucia.app/Contents/MacOS/Lucia",
+          "Lucia.app/Contents/PkgInfo",
+          "Lucia.app/Contents/Resources",
+          "Lucia.app/Contents/Resources/AppIcon.icns",
+          "Lucia.app/Contents/Resources/THIRD-PARTY-NOTICES.md",
+          "Lucia.app/Contents/Resources/icon.png",
+          "Lucia.app/Contents/_CodeSignature",
+          "Lucia.app/Contents/_CodeSignature/CodeResources"
+        ],
+        "windows-amd64": [
+          ".mygo-files",
+          "Lucia.exe",
+          "THIRD-PARTY-NOTICES.md",
+          "icon.png"
+        ]
+      },
+      "verifiedSignedPayloads": 8,
+      "checksumManifestValid": true,
+      "manifestVersionsAndNotesValid": true,
+      "installerScriptsUseTestChannel": true
+    }
+  ],
+  "signatureCheck": {
+    "verifiedPayloads": 14,
+    "algorithm": "Ed25519 over SHA-256 digest",
+    "tamperedDigestsRejected": true,
+    "negativeCase": "flip the first bit of each verified digest",
+    "guiBadSignatureInjection": false
+  },
+  "acceptance": {
+    "from": "0.0.1-rc.3",
+    "to": "0.0.1-rc.4",
+    "oldPid": 92715,
+    "newPid": 97152,
+    "oldExited": true,
+    "visibleNewPet": true,
+    "petBounds": {
+      "Height": 310,
+      "Width": 248,
+      "X": 1090,
+      "Y": 588
+    },
+    "consoleBounds": {
+      "Height": 700,
+      "Width": 1000,
+      "X": 284,
+      "Y": 96
+    },
+    "settingsPreserved": true,
+    "packFilesPreserved": true,
+    "packMetadataPreserved": true,
+    "windowStatePreserved": true,
+    "directoryLockHeldByNewProcess": true,
+    "directoryLockReleasedAfterQuit": true,
+    "secondInstanceExited": true,
+    "codesignVerified": true,
+    "selftest": "lucia: self-test: version=0.0.1-rc.4 commit=f2607268a009 platform=darwin/arm64 updates=enabled\n",
+    "postUpgradeCheck": "已是最新版本",
+    "finalProcessState": "quit after acceptance"
+  },
+  "installedAppSha256": {
+    "Contents/Info.plist": "13cfcb2e8521200ef3f5ce2ad809d6a480e733ae995b683ccc0e642f41f2ccd7",
+    "Contents/MacOS/Lucia": "6b013d6420fbc3ae65b50b3193b875c7deaba4effc348592a04ab9476ce81ab0",
+    "Contents/PkgInfo": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+    "Contents/Resources/AppIcon.icns": "7568034f7b623577675092c85a7e8ac533922e782065e43befcaf46bccc2103f",
+    "Contents/Resources/THIRD-PARTY-NOTICES.md": "315a9b23a05f2df5c47f829f6c70082c12a6a0875e908cdf1e1f32fb874ab27d",
+    "Contents/Resources/icon.png": "69e7c9de104892ec3c841753bb12816ee9bd4e4416573c20d586d0900f343bc1",
+    "Contents/_CodeSignature/CodeResources": "c3c9a5641d02e4007d9ddb2a2d5421962686c3f08b5a937287b530ff31733188"
+  },
+  "backup": {
+    "allCopiedFilesReverified": true,
+    "fileCounts": {
+      "app": 7,
+      "data": 36,
+      "logs": 0,
+      "cache": 0
+    },
+    "previousInstalledAppRetained": true
+  },
+  "logLinesWithUserPathsOmitted": [
+    "2026/11/14 14:11:21 lucia: update check: checking (running 0.0.1-rc.3)",
+    "2026/11/14 14:11:23 lucia: update check: found 0.0.1-rc.4 (running 0.0.1-rc.3)",
+    "2026/11/14 14:11:24 lucia: update install: downloading and verifying 0.0.1-rc.4",
+    "2026/11/14 14:11:25 lucia: update install: downloaded 16094 bytes",
+    "2026/11/14 14:11:25 lucia: update install: 0.0.1-rc.4 installed",
+    "2026/11/14 14:11:25 lucia: update installed, restarting",
+    "2026/11/14 14:11:25 lucia: exited",
+    "2026/11/14 14:11:25 lucia: version=0.0.1-rc.4 commit=f2607268a009 platform=darwin/arm64",
+    "2026/11/14 14:11:25 lucia: settings: check updates on launch=true",
+    "2026/11/14 14:11:26 lucia: pet pack \"naiwa\" loaded: 31 clips",
+    "2026/11/14 14:11:26 lucia: update check: checking (running 0.0.1-rc.4)",
+    "2026/11/14 14:11:28 lucia: update check: no version newer than 0.0.1-rc.4"
+  ],
+  "notCovered": [
+    "Windows native GUI upgrade, skipped by user decision",
+    "rc.2 to rc.3 framework migration",
+    "delta failure fallback to full archive",
+    "bad-signature injection through GUI",
+    "clean-machine Gatekeeper and SmartScreen prompts",
+    "stable-channel isolation before a stable release exists",
+    "generated install.sh and install.ps1 execution",
+    "performance and long-duration stability"
+  ]
+}

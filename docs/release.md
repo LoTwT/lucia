@@ -1,6 +1,6 @@
 # 发布与自动更新
 
-更新日期：2026-11-13。本文维护版本规则、两条发布渠道、密钥管理、打标签与发布步骤、发布后验证；构建与本地命令见 [development.md](development.md)，更新状态机见 [architecture.md](architecture.md#4-更新状态机)。
+更新日期：2026-11-14。本文维护版本规则、两条发布渠道、密钥管理、打标签与发布步骤、发布后验证；构建与本地命令见 [development.md](development.md)，更新状态机见 [architecture.md](architecture.md#4-更新状态机)。
 
 发布由 `LoTwT/lucia` 的 GitHub Releases 承担，也是 MyGo 内置更新器的下载源（MyGo v0.9.0）。
 
@@ -14,13 +14,13 @@
 
 ## 测试渠道升级演练
 
-不要为了验证自动更新创建正式 `v*` 标签。使用 `test-v0.0.1-rc.1` → `test-v0.0.1-rc.2` 两个测试版本即可，workflow 会把它们发布为不设 latest 的普通 Release。两个 RC 都是 `0.0.1` 的预发布版本，不占用正式 `v0.0.1`；测试设备在演练结束后重新安装正式版。
+不要为了验证自动更新创建正式 `v*` 标签。使用两个递增的 `test-v*` 预发布版本，workflow 会把它们发布为不设 latest 的普通 Release，不占用正式 `v0.0.1`；测试设备在演练结束后重新安装正式版。当前与历史演练的具体版本由[升级链路测试指南](testing-updates.md)维护。
 
 **不要勾选 GitHub 的 “Pre-release”**：Lucia 没有启用 MyGo v0.9.0 的 `Updater.SetPrereleases`，更新器默认只接受已发布、非草稿、非 GitHub 预发布的 Release，勾选后应用会忽略该版本。这里的“预发布”由 `test-v` 标签前缀隔离，而不是 GitHub 的预发布标记。
 
 双方需要准备的内容、分阶段操作、回传材料与判定标准见 [testing-updates.md](testing-updates.md)。
 
-2026-10-20 的 `0.0.1-rc.1` → `0.0.1-rc.2` 演练已在 macOS arm64（`~/Applications`）与 Windows amd64（每用户安装目录）通过；macOS `/Applications` 的 App Management 限制见测试指南。
+MyGo v0.9.0 的 macOS 自动升级及历史两平台演练结果见[升级链路测试指南](testing-updates.md)；其中也记录 macOS `/Applications` 的 App Management 限制和本阶段跳过的 Windows 真机验收。
 
 源文件中的 `mygo.json` 只有公钥与仓库，没有 `tagPrefix`；发布时为标签写入 `v` 或 `test-v`。
 
