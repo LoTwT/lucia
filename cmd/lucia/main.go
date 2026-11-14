@@ -76,6 +76,22 @@ func main() {
 	}
 	log.Printf("lucia: %s data=%q logs=%q", info.LogLine(), paths.Data, paths.Logs)
 
+	packStore := petpack.NewStore(paths.Data, "")
+	if err := packStore.Acquire(); err != nil {
+		log.Printf("lucia: packs: %v", err)
+		showStartupError(err.Error())
+		return
+	}
+	defer packStore.Close()
+	// MyGo relaunches after OnQuit, before Run returns. Release ownership
+	// here so the replacement process cannot race the deferred Close.
+	mygo.App.OnQuit(func() {
+		if err := packStore.Close(); err != nil {
+			log.Printf("lucia: release pack directory: %v", err)
+		}
+	})
+	// Settings are cached for the whole run. Read them only after taking
+	// ownership so a CLI import cannot change the selection underneath us.
 	settingsStore, prefs, err := settings.Open(paths.Data)
 	if err != nil {
 		log.Printf("lucia: settings: %v (using defaults)", err)
@@ -90,7 +106,6 @@ func main() {
 			prefs = updated
 		}
 	}
-	packStore := petpack.NewStore(paths.Data, prefs.PetPack)
 	if err := packStore.Recover(); err != nil {
 		log.Printf("lucia: recover packs: %v", err)
 	}
