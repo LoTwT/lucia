@@ -12,7 +12,7 @@
 | [testing-mygo-0.9.md](testing-mygo-0.9.md) | 查阅 MyGo v0.9.0 升级后的 macOS 实机验收、性能原始采样、未通过项目与未覆盖范围。 |
 | [testing-input-region.md](testing-input-region.md) | 查阅透明区域点击穿透的回归测试、macOS 跨应用鼠标验收、动画轮廓与性能短时采样。 |
 | [release.md](release.md) | 版本与渠道规则、更新密钥、打标签发布、发布后验证。 |
-| [testing-updates.md](testing-updates.md) | 用 `test-v` 测试渠道演练 `0.0.1-rc.1` → `0.0.1-rc.2` 升级链路时，双方需要准备的内容与操作步骤。 |
+| [testing-updates.md](testing-updates.md) | 查阅 MyGo v0.9.0 的 `rc.3` → `rc.4` macOS 升级验收，以及历史 `rc.1` → `rc.2` 两平台演练与操作步骤。 |
 | [../README.md](../README.md) | 项目简介与最短上手命令。 |
 | [../CHANGELOG.md](../CHANGELOG.md) | 用户可见的版本说明；也作为应用内更新说明的来源。 |
 
